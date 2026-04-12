@@ -1,0 +1,33 @@
+[project]
+name = "info-prompt-toolkit"
+version = "0.1.1"
+description = "Civitai-compatible metadata saving, same-name .txt captions, XY Plot, Tiled Sampling, SAM3, Detailer, PixAI Tagger, wildcards, and Dynamic Prompts to simplify ComfyUI wiring, improve reusability, and carry trial results into the next production pass."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "av",
+    "timm>=1.0.17",
+    "ftfy==6.1.1",
+    "regex",
+    "iopath>=0.1.10",
+    "typing_extensions",
+]
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+]
+
+[project.urls]
+Repository = "https://github.com/kinorax/comfyui-info-prompt-toolkit"
+"Bug Tracker" = "https://github.com/kinorax/comfyui-info-prompt-toolkit/issues"
+# Documentation = "https://github.com/kinorax/comfyui-info-prompt-toolkit"
+
+[tool.comfy]
+PublisherId = "kinorax"
+DisplayName = "ComfyUI-Info-Prompt-Toolkit"
+Icon = "https://raw.githubusercontent.com/kinorax/comfyui-info-prompt-toolkit/main/Icon.png"
+Banner = "https://raw.githubusercontent.com/kinorax/comfyui-info-prompt-toolkit/main/Banner.png"
+requires-comfyui = ">=0.17.0"

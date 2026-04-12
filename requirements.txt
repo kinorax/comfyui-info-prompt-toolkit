@@ -1,0 +1,15 @@
+# Used by this extension for extracting thumbnails from video preview media such as MP4.
+# `av` is also included in the standard ComfyUI requirements.
+av
+
+# Required for the vendored SAM3 Prompt To Mask node.
+# vendor/sam3 is bundled in this repository.
+# torch / Pillow / numpy are expected from the base ComfyUI environment and are not pinned here.
+# Also required for the local PixAI Tagger node.
+timm>=1.0.17
+
+# Required only for the vendored SAM3 Prompt To Mask node.
+ftfy==6.1.1
+regex
+iopath>=0.1.10
+typing_extensions
