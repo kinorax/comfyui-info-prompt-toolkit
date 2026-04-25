@@ -1,3 +1,4 @@
+# Copyright 2026 kinorax
 
 from PIL import Image, PngImagePlugin
 from typing import Optional, Any

@@ -1,3 +1,4 @@
+// Copyright 2026 kinorax
 import { app } from "../../scripts/app.js";
 import {
     getSelectorSlots,

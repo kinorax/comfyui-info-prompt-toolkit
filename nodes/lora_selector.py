@@ -1,3 +1,4 @@
+# Copyright 2026 kinorax
 from comfy_api.latest import io as c_io
 from .. import const as Const
 from ..utils.selector_resolution import resolve_selector_value

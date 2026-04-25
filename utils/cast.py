@@ -1,3 +1,4 @@
+# Copyright 2026 kinorax
 
 def str_or_none(v):
     return None if v is None else str(v)

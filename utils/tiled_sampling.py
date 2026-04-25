@@ -1,3 +1,4 @@
+# Copyright 2026 kinorax
 from __future__ import annotations
 
 import math
@@ -181,7 +182,7 @@ def build_spatial_tile_plans(
 
 def conditioning_controls(conditioning: object) -> list[object]:
     output: list[object] = []
-    if not isinstance(conditioning, list):
+    if not isinstance(conditioning, (list, tuple)):
         return output
 
     seen_ids: set[int] = set()
@@ -394,6 +395,15 @@ class SpatialTiledModelWrapper:
         output: dict[str, object] = {}
         for key, value in conditioning.items():
             if key == "control":
+                # Fall back to tiling already-materialized control tensors when
+                # the passthrough path did not leave a control object in args["c"].
+                if isinstance(value, (dict, list, tuple)) or _is_tensor_like(value):
+                    output[key] = tile_materialized_control(
+                        value,
+                        tile_plans=tile_plans,
+                        full_height=int(x_in.shape[-2]),
+                        full_width=int(x_in.shape[-1]),
+                    )
                 continue
             if key == "transformer_options" and isinstance(value, dict):
                 output[key] = repeat_transformer_options(value, repeated_cond_or_uncond, timestep)
@@ -468,6 +478,53 @@ def tile_tensor_batch(
         for output in outputs
     ]
     return torch.cat(normalized_outputs, dim=0)
+
+
+def tile_materialized_control(
+    control_value: object,
+    *,
+    tile_plans: Sequence[SpatialTilePlan],
+    full_height: int,
+    full_width: int,
+) -> object:
+    if _is_tensor_like(control_value):
+        return tile_tensor_batch(
+            control_value,
+            tile_plans,
+            full_height=full_height,
+            full_width=full_width,
+        )
+    if isinstance(control_value, list):
+        return [
+            tile_materialized_control(
+                item,
+                tile_plans=tile_plans,
+                full_height=full_height,
+                full_width=full_width,
+            )
+            for item in control_value
+        ]
+    if isinstance(control_value, tuple):
+        return tuple(
+            tile_materialized_control(
+                item,
+                tile_plans=tile_plans,
+                full_height=full_height,
+                full_width=full_width,
+            )
+            for item in control_value
+        )
+    if isinstance(control_value, dict):
+        return {
+            key: tile_materialized_control(
+                value,
+                tile_plans=tile_plans,
+                full_height=full_height,
+                full_width=full_width,
+            )
+            for key, value in control_value.items()
+        }
+    return control_value
 
 
 def tile_tensor_for_plan(

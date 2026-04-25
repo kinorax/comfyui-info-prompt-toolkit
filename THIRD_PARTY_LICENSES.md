@@ -14,12 +14,17 @@ It is not a full audit of all transitive dependencies in the base ComfyUI enviro
 
 | Package | Why it is required here | Reported upstream license | Upstream reference |
 |---|---|---|---|
-| `av` | Video-related features such as preview thumbnail extraction | `BSD-3-Clause` | https://github.com/PyAV-Org/PyAV/blob/main/LICENSE.txt |
 | `timm` | Local PixAI Tagger runtime and vendored `sam3` | `Apache-2.0` | https://pypi.org/project/timm/ |
 | `ftfy` | Vendored `sam3` tokenizer path | `Apache-2.0` | https://pypi.org/project/ftfy/ |
 | `regex` | Vendored `sam3` tokenizer path | `Apache-2.0` and `CNRI-Python` | https://github.com/mrabarnett/mrab-regex/blob/master/LICENSE.txt |
 | `iopath` | Vendored `sam3` model loading utilities | `MIT` | https://github.com/facebookresearch/iopath |
 | `typing_extensions` | Extension entrypoint typing helpers and vendored `sam3` | `PSF-2.0` | https://github.com/python/typing_extensions/blob/main/LICENSE |
+
+## Optional Video Dependency
+
+| Package | When it is used | Reported upstream license | Upstream reference |
+|---|---|---|---|
+| `av` | Video Reader / Video Saver runtime paths and video-backed thumbnail decode paths, when available in the environment | `BSD-3-Clause` | https://github.com/PyAV-Org/PyAV/blob/main/LICENSE.txt |
 
 ## Optional Models Obtained Separately By Users
 

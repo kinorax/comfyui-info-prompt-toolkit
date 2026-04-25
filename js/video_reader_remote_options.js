@@ -1,3 +1,4 @@
+// Copyright 2026 kinorax
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
@@ -22,8 +23,6 @@ const PREVIEW_STATE_KEY = "__iisVideoReaderPreviewState";
 
 const PREVIEW_WIDGET_NAME = "video_preview";
 const PREVIEW_WIDGET_MIN_HEIGHT = 172;
-const SOURCE_DISPLAY_SIZE_CACHE = new Map();
-const SOURCE_DISPLAY_PROBE_TIMEOUT_MS = 2500;
 
 function getNodeTypeCandidates(node) {
     return [
@@ -73,76 +72,6 @@ function normalizeDirectory(value) {
 
 function normalizeFileName(value) {
     return String(value ?? "").trim();
-}
-
-function buildSourceViewPath(pathSource, directory, file) {
-    const normalizedDirectory = normalizeDirectory(directory);
-    const params = normalizedDirectory === "."
-        ? new URLSearchParams({ filename: file, type: pathSource })
-        : new URLSearchParams({ filename: file, subfolder: normalizedDirectory, type: pathSource });
-    return `/view?${params.toString()}`;
-}
-
-function makeSourceDisplaySizeKey(queryParams) {
-    return `${queryParams.path_source}::${queryParams.directory}::${queryParams.file}`;
-}
-
-async function probeSourceDisplaySize(queryParams) {
-    if (!queryParams?.file) {
-        return null;
-    }
-    const cacheKey = makeSourceDisplaySizeKey(queryParams);
-    const cached = SOURCE_DISPLAY_SIZE_CACHE.get(cacheKey);
-    if (cached) {
-        return cached;
-    }
-
-    const sourcePath = buildSourceViewPath(queryParams.path_source, queryParams.directory, queryParams.file);
-    const src = typeof api?.apiURL === "function" ? api.apiURL(sourcePath) : sourcePath;
-
-    const probed = await new Promise((resolve) => {
-        const video = document.createElement("video");
-        let finished = false;
-
-        const complete = (value) => {
-            if (finished) {
-                return;
-            }
-            finished = true;
-            video.removeAttribute("src");
-            video.load?.();
-            resolve(value);
-        };
-
-        const timer = setTimeout(() => {
-            complete(null);
-        }, SOURCE_DISPLAY_PROBE_TIMEOUT_MS);
-
-        video.preload = "metadata";
-        video.muted = true;
-        video.playsInline = true;
-        video.onloadedmetadata = () => {
-            clearTimeout(timer);
-            const width = Number(video.videoWidth) || 0;
-            const height = Number(video.videoHeight) || 0;
-            if (width > 0 && height > 0) {
-                complete({ width, height });
-                return;
-            }
-            complete(null);
-        };
-        video.onerror = () => {
-            clearTimeout(timer);
-            complete(null);
-        };
-        video.src = src;
-    });
-
-    if (probed && probed.width > 0 && probed.height > 0) {
-        SOURCE_DISPLAY_SIZE_CACHE.set(cacheKey, probed);
-        return probed;
-    }
-    return null;
 }
 
 function normalizeInteger(value, fallback, minimum) {
@@ -369,14 +298,7 @@ function buildPreviewQuery(node) {
 }
 
 async function fetchPreviewPayload(queryParams) {
-    const sourceDisplaySize = await probeSourceDisplaySize(queryParams);
-    const requestParams = { ...queryParams };
-    if (sourceDisplaySize) {
-        requestParams.source_display_width_hint = String(sourceDisplaySize.width);
-        requestParams.source_display_height_hint = String(sourceDisplaySize.height);
-    }
-
-    const query = new URLSearchParams(requestParams).toString();
+    const query = new URLSearchParams(queryParams).toString();
     const response = await api.fetchApi(`/iis/video-reader/preview?${query}`, {
         method: "GET",
         cache: "no-store",
@@ -430,10 +352,10 @@ async function refreshPreview(node) {
             return;
         }
 
-        const mode = String(payload.mode ?? "reflect");
+        const mode = String(payload.mode ?? "source");
         const cacheToken = payload.cache_key
             ? String(payload.cache_key)
-            : `passthrough:${queryParams.path_source}:${queryParams.directory}:${queryParams.file}`;
+            : `source:${queryParams.path_source}:${queryParams.directory}:${queryParams.file}`;
         const mediaUrl = `${payload.url}${payload.url.includes("?") ? "&" : "?"}cache_key=${encodeURIComponent(cacheToken)}`;
         const resolvedUrl = typeof api?.apiURL === "function" ? api.apiURL(mediaUrl) : mediaUrl;
 
@@ -449,14 +371,8 @@ async function refreshPreview(node) {
 
         const selectedFrames = payload.selected_frames;
         const previewFps = payload.preview_fps;
-        if (mode === "passthrough") {
-            const thresholdFrames = payload.threshold_frames;
-            const reason = payload.reason ? String(payload.reason) : "threshold";
-            if (thresholdFrames != null) {
-                setPreviewStatus(previewState, `Preview: passthrough (${reason}, threshold=${thresholdFrames} frames)`);
-            } else {
-                setPreviewStatus(previewState, `Preview: passthrough (${reason})`);
-            }
+        if (mode === "source") {
+            setPreviewStatus(previewState, "Preview: source video (no preview re-encode)");
         } else if (selectedFrames != null && previewFps != null) {
             setPreviewStatus(previewState, `Preview: ${selectedFrames} frames @ ${Number(previewFps).toFixed(3)} fps`);
         } else {

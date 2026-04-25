@@ -2,11 +2,6 @@
 
 # ComfyUI-Info-Prompt-Toolkit
 
-### Current Registry Status
-<p><strong>This branch is currently limiting the number of registered nodes while basic behavior is being verified for ComfyUI registry submission.</strong><br>
-<strong>The nodes currently published in this branch are <code>Prompt Template</code>, <code>SAM3 Prompt To Mask</code>, <code>PixAI Tagger</code>, <code>Mask Overlay Comparer</code>, <code>Aspect Ratio to Size</code>, <code>Grow Mask</code>, <code>Remove Small Soft Mask Regions</code>, <code>SetStringExtra</code>, and <code>LoraSelector</code>.</strong><br>
-<strong>The remaining nodes, around 60 in total, are planned to be published soon.</strong></p>
-
 This extension node collection is built around simplifying ComfyUI wiring and improving reusability, so trial results are easier to carry into the next production pass.  
 Key features include Civitai-compatible image metadata saving, same-name `.txt` caption saving, XY Plot, Tiled Sampling (`SDXL (with ControlNet Tile)` and `Anima`), SAM3, Detailer, PixAI Tagger, wildcards, and Dynamic Prompts to strengthen your workflow.
 
@@ -18,6 +13,7 @@ git clone https://github.com/kinorax/comfyui-info-prompt-toolkit.git
 cd comfyui-info-prompt-toolkit
 pip install -r requirements.txt
 ```
+Installing via ComfyUI Manager is the easiest option.
 
 > Note: `SAM3 Prompt To Mask` and `PixAI Tagger` require manual placement of model files under `ComfyUI/models` after installation. See the relevant sections in `Core Nodes` for details.
 
@@ -97,7 +93,7 @@ pip install -r requirements.txt
   <li>The output is a non-binarized <code>soft mask</code>; thresholding and region cleanup are intended to be handled by downstream nodes.</li>
   <li>This node is designed with a strong focus on keeping additional <code>pip</code>-installed dependencies to a minimum, because some existing SAM3-related extensions can significantly alter Python environments.</li>
   <li>Under that policy, SAM3-related functionality is intentionally limited to this single purpose, and no further feature additions are planned at this time.</li>
-  <li>Place <code>sam3.pt</code> in <code>ComfyUI/models/sam3</code> (operation with SAM3.1 and later is unverified).</li>
+  <li>Place <code>sam3.pt</code> in <code>ComfyUI/models/sam3</code> (download: <a href="https://huggingface.co/facebook/sam3">facebook/sam3</a>; operation with SAM3.1 and later is unverified).</li>
 </ul>
 <br clear="left">
 
@@ -109,7 +105,7 @@ pip install -r requirements.txt
   <li>Tag selection is controlled by <code>mode</code>: <code>threshold</code> uses score thresholds, while <code>topk</code> keeps top-ranked tags per category.</li>
   <li>This node does not depend on <code>onnxruntime</code> or <code>onnxruntime-gpu</code> and runs on a local PyTorch implementation.</li>
   <li>By avoiding additional ONNX Runtime installation, the design prioritizes resilience against Python environment changes.</li>
-  <li>Use the PixAI Tagger v0.9 bundle (<code>model_v0.9.pth</code> / <code>tags_v0.9_13k.json</code> / <code>char_ip_map.json</code>) placed in <code>ComfyUI/models/pixai_tagger</code>.</li>
+  <li>Place the PixAI Tagger v0.9 bundle (<code>model_v0.9.pth</code> / <code>tags_v0.9_13k.json</code> / <code>char_ip_map.json</code>) in <code>ComfyUI/models/pixai_tagger</code> (download: <a href="https://huggingface.co/pixai-labs/pixai-tagger-v0.9">pixai-labs/pixai-tagger-v0.9</a>).</li>
 </ul>
 <br clear="left">
 
@@ -157,10 +153,9 @@ pip install -r requirements.txt
 <ul>
   <li><code>Video Reader</code> and <code>Video Saver</code> are a paired set of nodes that support video reuse workflows while retaining generation metadata (<code>source_image_info</code> / <code>video_info</code>).</li>
   <li><code>Video Reader</code> outputs <code>image</code> as a list. If downstream nodes expect batch-oriented image input or do not assume list expansion, route through <code>Image List To Batch</code>.</li>
-  <li>In <code>Video Saver</code>, <code>crf</code> controls the quality/file-size tradeoff; lower values generally produce higher quality and larger files.</li>
-  <li>In <code>Video Saver</code>, <code>preset</code> controls the encode speed/compression-efficiency tradeoff; higher values are generally faster, while lower values are generally more efficient.</li>
-  <li><code>source_image_info</code> and <code>video_info</code> are handled as separate contexts and are not merged automatically.</li>
-  <li>When connected to <code>Video Saver</code>, <code>source_image_info</code> and <code>video_info</code> are saved as separate infotexts, making condition tracking and comparison easier during reuse.</li>
+  <li>In <code>Video Saver</code>, the active <code>crf</code> field controls the quality/file-size tradeoff; lower values generally produce higher quality and larger files.</li>
+  <li><code>source_image_info</code> keeps source-image information, while <code>video_info</code> keeps video-related information for easier review and comparison later.</li>
+  <li><code>Video Reader</code> / <code>Video Saver</code> are available in environments where <code>PyAV</code> (<code>av</code>) is installed. Available codecs depend on the user's PyAV / FFmpeg build.</li>
 </ul>
 <br clear="left">
 
@@ -193,7 +188,8 @@ pip install -r requirements.txt
 <ul>
   <li><code>Load New Model</code> and <code>Use Loaded Model</code> are a paired workflow that separates model loading from model reuse.</li>
   <li><code>Load New Model</code> loads <code>model</code>, <code>clip</code>, and <code>vae</code> from inputs provided by selector nodes.</li>
-  <li>If you use <code>TorchCompile</code>-related nodes, place them after <code>Load New Model</code>, then connect their outputs to <code>Use Loaded Model</code> via <code>loaded_model</code>, <code>loaded_clip</code>, and <code>loaded_vae</code>.</li>
+  <li><code>Use Loaded Model</code> applies <code>lora_stack</code> internally by default. Set <code>apply_lora_stack</code> to <code>false</code> if <code>loaded_model</code> and <code>loaded_clip</code> already include the same LoRA application.</li>
+  <li>If you want to pass through <code>Lora Stack Lorader</code> or <code>TorchCompile</code>-related nodes before <code>Use Loaded Model</code>, place them after <code>Load New Model</code>, then connect their outputs to <code>loaded_model</code>, <code>loaded_clip</code>, and <code>loaded_vae</code> with <code>apply_lora_stack=false</code>.</li>
   <li><code>Use Loaded Model</code> switches by condition set (such as <code>model</code> plus <code>lora_stack</code>), which helps reduce duplicate loads when the same setup is reused.</li>
   <li><code>lora_stack</code> matching is order- and strength-sensitive, so changing order or values is treated as a different condition set.</li>
   <li>Supported targets are checkpoint-based and diffusion_models-based models.</li>

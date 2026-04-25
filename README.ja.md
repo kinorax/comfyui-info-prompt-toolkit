@@ -2,11 +2,6 @@
 
 # ComfyUI-Info-Prompt-Toolkit
 
-### 現在の公開状況
-<p><strong>現在は簡単な挙動の確認中のため、登録ノード数を制限しています。</strong><br>
-<strong>現在公開状態にあるノードは <code>Prompt Template</code>、<code>SAM3 Prompt To Mask</code>、<code>PixAI Tagger</code>、<code>Mask Overlay Comparer</code>、<code>Aspect Ratio to Size</code>、<code>Grow Mask</code>、<code>Remove Small Soft Mask Regions</code>、<code>SetStringExtra</code>、<code>LoraSelector</code> です。</strong><br>
-<strong>残りのノードは約60個あり、近日中に公開予定です。</strong></p>
-
 ComfyUIの配線の簡素化と再利用性の向上を軸に、試行結果を次の制作へ活かしやすくするための拡張ノード集です。  
 主な機能は、Civitai互換を意識した画像メタデータ保存、同名 `.txt` キャプション保存、XY Plot、Tiled Sampling（`SDXL (with ControlNet Tile)` と `Anima`）、SAM3、Detailer、PixAI Tagger、wildcards、Dynamic Promptsで、ワークフローを強化できます。
 
@@ -18,6 +13,7 @@ git clone https://github.com/kinorax/comfyui-info-prompt-toolkit.git
 cd comfyui-info-prompt-toolkit
 pip install -r requirements.txt
 ```
+インストールは ComfyUI Manager 経由が簡単です。
 
 > 注: `SAM3 Prompt To Mask` と `PixAI Tagger` は、インストール後に `ComfyUI/models` 配下へモデルファイルを手動で配置する必要があります。詳細は `Core Nodes` の各説明を参照してください。
 
@@ -97,7 +93,7 @@ pip install -r requirements.txt
   <li>出力は二値化しない <code>soft mask</code> で、しきい値化や領域調整は後段ノードで行う前提です。</li>
   <li>このノードは、追加で <code>pip</code> インストールが必要な依存パッケージを最小限に抑えることを最優先に設計しています。既存の SAM3 系拡張で Python 環境への影響が大きいケースがあったためです。</li>
   <li>その方針により SAM3 関連機能は意図的に単機能へ限定しており、現時点でこれ以上の機能追加予定はありません。</li>
-  <li><code>sam3.pt</code> は <code>ComfyUI/models/sam3</code> に配置してください（SAM3.1以降は動作未確認です）。</li>
+  <li><code>sam3.pt</code> を <code>ComfyUI/models/sam3</code> に配置してください（取得元: <a href="https://huggingface.co/facebook/sam3">facebook/sam3</a>。SAM3.1以降は動作未確認です）。</li>
 </ul>
 <br clear="left">
 
@@ -109,7 +105,7 @@ pip install -r requirements.txt
   <li>タグ選別は <code>mode</code> で切り替えでき、<code>threshold</code> では閾値ベース、<code>topk</code> ではカテゴリごとの上位件数ベースで出力を制御できます。</li>
   <li>本ノードは <code>onnxruntime</code> / <code>onnxruntime-gpu</code> に依存せず、ローカルの PyTorch 実装で動作します。</li>
   <li>ONNX Runtime 系の追加導入を避けることで、Python 環境の変化に対して影響を受けにくい構成を重視しています。</li>
-  <li>モデルは PixAI Tagger v0.9 バンドル（<code>model_v0.9.pth</code> / <code>tags_v0.9_13k.json</code> / <code>char_ip_map.json</code>）を <code>ComfyUI/models/pixai_tagger</code> に配置して使用します。</li>
+  <li>PixAI Tagger v0.9 バンドル（<code>model_v0.9.pth</code> / <code>tags_v0.9_13k.json</code> / <code>char_ip_map.json</code>）を <code>ComfyUI/models/pixai_tagger</code> に配置してください（取得元: <a href="https://huggingface.co/pixai-labs/pixai-tagger-v0.9">pixai-labs/pixai-tagger-v0.9</a>）。</li>
 </ul>
 <br clear="left">
 
@@ -157,10 +153,9 @@ pip install -r requirements.txt
 <ul>
   <li><code>Video Reader</code> と <code>Video Saver</code> は、生成情報（<code>source_image_info</code> / <code>video_info</code>）を保持した動画の再利用ワークフローを支えるペアノードです。</li>
   <li><code>Video Reader</code> の <code>image</code> はリスト出力です。後段がバッチ処理前提、またはリスト展開を想定していない場合は <code>Image List To Batch</code> を経由してください。</li>
-  <li><code>Video Saver</code> の <code>crf</code> は画質とファイルサイズのバランスを調整する値で、一般に小さいほど高画質・大容量になりやすくなります。</li>
-  <li><code>Video Saver</code> の <code>preset</code> はエンコード速度と圧縮効率のバランスを調整する値で、一般に大きいほど高速、小さいほど高効率になりやすくなります。</li>
-  <li><code>source_image_info</code> と <code>video_info</code> は用途を分けて扱われ、自動ではマージされません。</li>
-  <li><code>Video Saver</code> に <code>source_image_info</code> / <code>video_info</code> を接続すると、それぞれ独立した infotext として保存され、再利用時の条件追跡や比較がしやすくなります。</li>
+  <li><code>Video Saver</code> の表示中の <code>crf</code> は画質とファイルサイズのバランスを調整する値で、一般に小さいほど高画質・大容量になりやすくなります。</li>
+  <li><code>source_image_info</code> は元画像の情報、<code>video_info</code> は動画関連の情報として保持され、あとから見直しや比較がしやすくなります。</li>
+  <li><code>Video Reader</code> / <code>Video Saver</code> は、<code>PyAV</code> (<code>av</code>) がインストールされた環境で利用可能です。利用可能な codec は、ユーザー環境の PyAV / FFmpeg build に依存します。</li>
 </ul>
 <br clear="left">
 
@@ -193,7 +188,8 @@ pip install -r requirements.txt
 <ul>
   <li><code>Load New Model</code> と <code>Use Loaded Model</code> は、モデル読み込みと再利用を分担するペアノードです。</li>
   <li><code>Load New Model</code> は、Selector系ノードから受けた情報をもとに <code>model</code> / <code>clip</code> / <code>vae</code> を読み出します。</li>
-  <li><code>TorchCompile</code> 系ノードを使う場合は、<code>Load New Model</code> の出力を先に <code>TorchCompile</code> 系ノードへ渡し、その出力を <code>Use Loaded Model</code> の <code>loaded_model</code> / <code>loaded_clip</code> / <code>loaded_vae</code> に接続して利用できます。</li>
+  <li><code>Use Loaded Model</code> は、デフォルトではノード内部で <code>lora_stack</code> を適用します。<code>loaded_model</code> / <code>loaded_clip</code> 側で同じ LoRA 適用を済ませている場合は <code>apply_lora_stack=false</code> にしてください。</li>
+  <li><code>Lora Stack Lorader</code> や <code>TorchCompile</code> 系ノードを <code>Use Loaded Model</code> の前段に挟みたい場合は、<code>Load New Model</code> の出力をそれらへ通し、最終出力を <code>loaded_model</code> / <code>loaded_clip</code> / <code>loaded_vae</code> に接続したうえで <code>apply_lora_stack=false</code> を使います。</li>
   <li><code>Use Loaded Model</code> は、<code>model</code> と <code>lora_stack</code> などの条件組み合わせごとに結果を切り替えるため、同条件での重複読み込みを減らしやすくなります。</li>
   <li><code>lora_stack</code> は要素の順序と強度も条件に含まれるため、並び順や値が変わると別条件として扱われます。</li>
   <li>対応対象は checkpoint 系と diffusion_models 系です。</li>

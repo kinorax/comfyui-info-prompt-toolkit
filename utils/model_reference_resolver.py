@@ -1,3 +1,4 @@
+# Copyright 2026 kinorax
 from __future__ import annotations
 
 from datetime import datetime, timezone

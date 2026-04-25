@@ -1,6 +1,5 @@
-# Used by this extension for extracting thumbnails from video preview media such as MP4.
-# `av` is also included in the standard ComfyUI requirements.
-av
+# Video Reader / Video Saver use PyAV (`av`) when it is available in the environment.
+# `av` is intentionally not declared here because non-video features do not require it.
 
 # Required for the vendored SAM3 Prompt To Mask node.
 # vendor/sam3 is bundled in this repository.

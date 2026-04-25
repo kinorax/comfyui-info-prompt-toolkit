@@ -1,3 +1,4 @@
+# Copyright 2026 kinorax
 from __future__ import annotations
 
 from comfy_api.latest import io as c_io

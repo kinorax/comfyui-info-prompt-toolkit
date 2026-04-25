@@ -1,3 +1,4 @@
+// Copyright 2026 kinorax
 const RAW_SELECTOR_TARGETS = [
     {
         nodeTypes: ["IPT-CheckpointSelector", "CheckpointSelector", "Checkpoint Selector"],

@@ -1,3 +1,4 @@
+# Copyright 2026 kinorax
 from pathlib import Path
 from functools import lru_cache
 import comfy.samplers

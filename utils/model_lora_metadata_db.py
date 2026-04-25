@@ -1,4 +1,5 @@
-﻿from __future__ import annotations
+﻿# Copyright 2026 kinorax
+from __future__ import annotations
 
 import json
 import os
