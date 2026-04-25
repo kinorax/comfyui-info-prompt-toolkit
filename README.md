@@ -17,6 +17,15 @@ Installing via ComfyUI Manager is the easiest option.
 
 > Note: `SAM3 Prompt To Mask` and `PixAI Tagger` require manual placement of model files under `ComfyUI/models` after installation. See the relevant sections in `Core Nodes` for details.
 
+## Support Ongoing Development
+
+A paid note article is available for users who want polished results with less trial and error. It introduces production-oriented SDXL and Anima workflows built with these custom nodes. Purchasing the article helps support ongoing development.
+
+Article: [ComfyUI SDXL & Anima Workflow: Automatic Detailer, XY Plot, Caption File Generation, and More](https://note.com/vast_zinnia5253/n/n95a43362d467?hl=en)
+
+- The article is written in Japanese, and starting on Wednesday, May 27, 2026, note offers automatic multilingual translation for articles.
+- The workflow files use English labels throughout.
+
 ## Core Nodes
 
 ### SamplerCustom (Sampler Params, Tiled) / SamplerCustom (Sampler Params)

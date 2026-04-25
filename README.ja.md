@@ -17,6 +17,12 @@ pip install -r requirements.txt
 
 > 注: `SAM3 Prompt To Mask` と `PixAI Tagger` は、インストール後に `ComfyUI/models` 配下へモデルファイルを手動で配置する必要があります。詳細は `Core Nodes` の各説明を参照してください。
 
+## Support Ongoing Development
+
+試行錯誤を減らして完成度の高い結果を得たいユーザー向けに、このカスタムノードを活用した実制作向けの有料記事を公開しています。SDXL と Anima に対応したワークフローや、導入手順、実際の使い方をまとめています。ご購入いただけると、継続開発の支援になります。
+
+記事: [〖ComfyUI〗SDXL & Anima WF。自動Detailer、XY Plot、キャプションファイル生成、etc...](https://note.com/vast_zinnia5253/n/n95a43362d467)
+
 ## Core Nodes
 
 ### SamplerCustom (Sampler Params, Tiled) / SamplerCustom (Sampler Params)
