@@ -14,6 +14,7 @@ CATEGORY_PROMPT = "Info-Prompt-Toolkit/Prompt"
 CATEGORY_MASK = "Info-Prompt-Toolkit/Mask"
 CATEGORY_XYPLOT = "Info-Prompt-Toolkit/XYPlot"
 CATEGORY_DEBUG = "Info-Prompt-Toolkit/Debug"
+CATEGORY_UTILITY = "Info-Prompt-Toolkit/Utility"
 
 IMAGEINFO_TYPE = c_io.Custom("IPT-IMAGEINFO")
 MODEL_TYPE = c_io.Custom("IPT-Model")
@@ -63,6 +64,15 @@ MODEL_VALUE_DEVICE_KEY = "device"
 MODEL_VALUE_WEIGHT_DTYPE_KEY = "weight_dtype"
 MODEL_VALUE_SD3_SHIFT_KEY = MODEL_RUNTIME_SETTING_SD3_SHIFT_KEY
 MODEL_VALUE_AURAFLOW_SHIFT_KEY = "model_sampling_auraflow_shift"
+MODEL_MERGE_PAYLOAD_KEY = "ipt_model_merge"
+MODEL_MERGE_VERSION_KEY = "version"
+MODEL_MERGE_MODE_KEY = "mode"
+MODEL_MERGE_BASE_MODEL_KEY = "base_model"
+MODEL_MERGE_MODEL_KEY = "merge_model"
+MODEL_MERGE_MODEL_RATIO_KEY = "model_ratio"
+MODEL_MERGE_CLIP_RATIO_KEY = "clip_ratio"
+MODEL_MERGE_VERSION = 1
+MODEL_MERGE_MODE_SIMPLE = "simple"
 WEIGHT_DTYPE_OPTIONS_FALLBACK = ("default", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e5m2")
 CLIP_TYPE_OPTIONS_FALLBACK = (
     "stable_diffusion",

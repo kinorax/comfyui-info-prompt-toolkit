@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 from typing import Any, Mapping
 
+from .model_merge import is_model_merge_value, model_merge_json_or_none, model_value_from_merge_json
+
 IMAGEINFO_POSITIVE = "positive"
 IMAGEINFO_NEGATIVE = "negative"
 IMAGEINFO_STEPS = "steps"
@@ -38,6 +40,9 @@ _PARAM_SIZE = "Size"
 _PARAM_MODEL = "Model"
 _PARAM_REFINER = "Refiner"
 _PARAM_DETAILER = "Detailer"
+_PARAM_MODEL_MERGE = "Model Merge"
+_PARAM_REFINER_MERGE = "Refiner Merge"
+_PARAM_DETAILER_MERGE = "Detailer Merge"
 _PARAM_MODEL_FOLDER_PATHS = "Model folder paths"
 _PARAM_CLIP_TYPE = "Clip type"
 _PARAM_CLIP_DEVICE = "Clip device"
@@ -73,6 +78,9 @@ _KNOWN_PARAMETER_KEYS = {
     _PARAM_MODEL,
     _PARAM_REFINER,
     _PARAM_DETAILER,
+    _PARAM_MODEL_MERGE,
+    _PARAM_REFINER_MERGE,
+    _PARAM_DETAILER_MERGE,
     _PARAM_MODEL_FOLDER_PATHS,
     _PARAM_CLIP_TYPE,
     _PARAM_CLIP_DEVICE,
@@ -206,13 +214,29 @@ def _build_parameter_line(data: Mapping[str, Any]) -> str:
     if width is not None and height is not None:
         add_pair(_PARAM_SIZE, f"{width}x{height}")
 
-    model_name, model_folder_paths = _extract_model_fields(data.get(IMAGEINFO_MODEL))
-    add_pair(_PARAM_MODEL, model_name)
-    refiner_name, _ = _extract_model_fields(data.get(IMAGEINFO_REFINER_MODEL))
-    add_pair(_PARAM_REFINER, refiner_name)
-    detailer_name, _ = _extract_model_fields(data.get(IMAGEINFO_DETAILER_MODEL))
-    add_pair(_PARAM_DETAILER, detailer_name)
-    add_pair(_PARAM_MODEL_FOLDER_PATHS, model_folder_paths)
+    model_value = data.get(IMAGEINFO_MODEL)
+    refiner_value = data.get(IMAGEINFO_REFINER_MODEL)
+    detailer_value = data.get(IMAGEINFO_DETAILER_MODEL)
+
+    model_name, _ = _extract_model_fields(model_value)
+    if is_model_merge_value(model_value):
+        add_pair(_PARAM_MODEL_MERGE, model_merge_json_or_none(model_value))
+    else:
+        add_pair(_PARAM_MODEL, model_name)
+
+    refiner_name, _ = _extract_model_fields(refiner_value)
+    if is_model_merge_value(refiner_value):
+        add_pair(_PARAM_REFINER_MERGE, model_merge_json_or_none(refiner_value))
+    else:
+        add_pair(_PARAM_REFINER, refiner_name)
+
+    detailer_name, _ = _extract_model_fields(detailer_value)
+    if is_model_merge_value(detailer_value):
+        add_pair(_PARAM_DETAILER_MERGE, model_merge_json_or_none(detailer_value))
+    else:
+        add_pair(_PARAM_DETAILER, detailer_name)
+
+    add_pair(_PARAM_MODEL_FOLDER_PATHS, _shared_non_merge_model_folder_paths(data))
     for key, value in _model_metadata_parameter_pairs(data):
         add_pair(key, value)
     for key, value in _clip_parameter_pairs(data):
@@ -254,6 +278,17 @@ def _model_metadata_parameter_pairs(data: Mapping[str, Any]) -> list[tuple[str, 
     return output
 
 
+def _shared_non_merge_model_folder_paths(data: Mapping[str, Any]) -> str | None:
+    for key in (IMAGEINFO_MODEL, IMAGEINFO_REFINER_MODEL, IMAGEINFO_DETAILER_MODEL):
+        value = data.get(key)
+        if not isinstance(value, Mapping) or is_model_merge_value(value):
+            continue
+        folder_paths = _coerce_string(value.get("folder_paths"))
+        if folder_paths:
+            return folder_paths
+    return None
+
+
 def _clip_parameter_pairs(data: Mapping[str, Any]) -> list[tuple[str, Any]]:
     clip_value = data.get(IMAGEINFO_CLIP)
     if not isinstance(clip_value, Mapping):
@@ -280,6 +315,8 @@ def _clip_parameter_pairs(data: Mapping[str, Any]) -> list[tuple[str, Any]]:
 
 def _single_model_metadata_parameter_pairs(model_value: Any, label: str) -> list[tuple[str, Any]]:
     if not isinstance(model_value, Mapping):
+        return []
+    if is_model_merge_value(model_value):
         return []
 
     output: list[tuple[str, Any]] = []
@@ -784,18 +821,32 @@ def _assign_known_parameter(output: dict[str, Any], key: str, value: str) -> boo
         detailer["name"] = text
         return True
 
+    if key == _PARAM_MODEL_MERGE:
+        return _assign_model_merge_payload(output, IMAGEINFO_MODEL, value)
+
+    if key == _PARAM_REFINER_MERGE:
+        return _assign_model_merge_payload(output, IMAGEINFO_REFINER_MODEL, value)
+
+    if key == _PARAM_DETAILER_MERGE:
+        return _assign_model_merge_payload(output, IMAGEINFO_DETAILER_MODEL, value)
+
     if key == _PARAM_MODEL_FOLDER_PATHS:
         text = _coerce_string(value)
         if not text:
             return False
-        model = _ensure_model_dict(output, IMAGEINFO_MODEL)
-        model["folder_paths"] = text
+        model = output.get(IMAGEINFO_MODEL)
+        if isinstance(model, dict):
+            if not is_model_merge_value(model):
+                model["folder_paths"] = text
+        else:
+            model = _ensure_model_dict(output, IMAGEINFO_MODEL)
+            model["folder_paths"] = text
 
         refiner = output.get(IMAGEINFO_REFINER_MODEL)
-        if isinstance(refiner, dict):
+        if isinstance(refiner, dict) and not is_model_merge_value(refiner):
             refiner["folder_paths"] = text
         detailer = output.get(IMAGEINFO_DETAILER_MODEL)
-        if isinstance(detailer, dict):
+        if isinstance(detailer, dict) and not is_model_merge_value(detailer):
             detailer["folder_paths"] = text
         return True
 
@@ -856,6 +907,14 @@ def _assign_known_parameter(output: dict[str, Any], key: str, value: str) -> boo
         return _assign_model_metadata_float(output, IMAGEINFO_DETAILER_MODEL, _MODEL_AURAFLOW_SHIFT_KEY, value)
 
     return False
+
+
+def _assign_model_merge_payload(output: dict[str, Any], model_key: str, value: str) -> bool:
+    model_value = model_value_from_merge_json(value)
+    if model_value is None:
+        return False
+    output[model_key] = model_value
+    return True
 
 
 def _ensure_model_dict(output: dict[str, Any], model_key: str) -> dict[str, Any]:
@@ -933,6 +992,9 @@ def _assign_model_metadata_string(
     text = _coerce_string(value)
     if not text:
         return False
+    current = output.get(model_key)
+    if isinstance(current, dict) and is_model_merge_value(current):
+        return False
     model = _ensure_model_dict_with_default_folder(output, model_key)
     model[metadata_key] = text
     return True
@@ -946,6 +1008,9 @@ def _assign_model_metadata_float(
 ) -> bool:
     parsed = _coerce_float(value)
     if parsed is None:
+        return False
+    current = output.get(model_key)
+    if isinstance(current, dict) and is_model_merge_value(current):
         return False
     model = _ensure_model_dict_with_default_folder(output, model_key)
     model[metadata_key] = parsed

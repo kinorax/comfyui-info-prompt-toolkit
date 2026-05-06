@@ -1,4 +1,6 @@
 # Copyright 2026 kinorax
+from __future__ import annotations
+
 from typing_extensions import override
 from comfy_api.latest import ComfyExtension, io as c_io
 from .nodes.image_info_context import ImageInfoContext
@@ -19,6 +21,7 @@ from .nodes.lora_selector import LoraSelector
 from .nodes.checkpoint_selector import CheckpointSelector
 from .nodes.use_loaded_model import UseLoadedModel
 from .nodes.load_new_model import LoadNewModel
+# from .nodes.model_merge import ModelMerge
 from .nodes.vae_selector import VaeSelector
 from .nodes.clip_selector import ClipSelector
 from .nodes.dual_clip_selector import DualClipSelector
@@ -57,6 +60,7 @@ from .nodes.aspect_ratio_to_size import AspectRatioToSize
 from .nodes.scale_width_height import ScaleWidthHeight
 from .nodes.remove_image_info_extra_key import RemoveImageInfoExtraKeys
 from .nodes.remove_image_info_main_field import RemoveImageInfoMainFields
+from .nodes.release_memory import ReleaseMemory
 from .nodes.get_string_extra import GetStringExtra
 from .nodes.get_lora_stack_extra import GetLoraStackExtra
 from .nodes.get_sampler_params_extra import GetSamplerParamsExtra
@@ -65,9 +69,6 @@ from .nodes.get_float_extra import GetFloatExtra
 from .nodes.get_size_extra import GetSizeExtra
 from .nodes.split_width_height import SplitWidthHeight
 from .nodes.seed_generator import SeedGenerator
-# from .nodes.loop_start_simple import LoopStartSimple
-# from .nodes.loop_end_simple import LoopEndSimple
-# from .nodes.loop_image_list_relay_simple import LoopImageListRelaySimple
 from .nodes.mask.mask_overlay_comparer import MaskOverlayComparer
 from .nodes.mask.detailer_start import DetailerStart
 from .nodes.mask.detailer_end import DetailerEnd
@@ -83,7 +84,9 @@ from .utils import image_batch_reader_directory_api as _image_batch_reader_direc
 from .utils import image_reader_model_check_api as _image_reader_model_check_api  # noqa: F401
 from .utils import model_lora_metadata_api as _model_lora_metadata_api  # noqa: F401
 from .utils import prompt_template_wildcards_api as _prompt_template_wildcards_api  # noqa: F401
+from .utils import release_memory_api as _release_memory_api  # noqa: F401
 from .utils import video_reader_remote_options_api as _video_reader_remote_options_api  # noqa: F401
+from .utils.development_nodes import load_development_node_list as _load_development_node_list
 from .utils.model_lora_metadata_pipeline import get_shared_metadata_pipeline as _get_shared_metadata_pipeline
 
 WEB_DIRECTORY = "./js"
@@ -95,7 +98,7 @@ _get_shared_metadata_pipeline(start=True)
 class _Extension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[c_io.ComfyNode]]:
-        return [
+        node_list: list[type[c_io.ComfyNode]] = [
             ImageInfoContext,
             ImageInfoDefaults,
             ImageInfoFallback,
@@ -113,6 +116,7 @@ class _Extension(ComfyExtension):
             LoraSelector,
             CheckpointSelector,
             LoadNewModel,
+            # ModelMerge,
             UseLoadedModel,
             VaeSelector,
             ClipSelector,
@@ -152,6 +156,7 @@ class _Extension(ComfyExtension):
             ScaleWidthHeight,
             RemoveImageInfoExtraKeys,
             RemoveImageInfoMainFields,
+            ReleaseMemory,
             GetStringExtra,
             GetLoraStackExtra,
             GetSamplerParamsExtra,
@@ -160,9 +165,6 @@ class _Extension(ComfyExtension):
             GetSizeExtra,
             SplitWidthHeight,
             SeedGenerator,
-            # LoopStartSimple,
-            # LoopEndSimple,
-            # LoopImageListRelaySimple,
             MaskOverlayComparer,
             DetailerStart,
             DetailerEnd,
@@ -174,6 +176,8 @@ class _Extension(ComfyExtension):
             XYPlotStart,
             XYPlotEnd,
         ]
+        node_list.extend(_load_development_node_list(__package__, __file__))
+        return node_list
 
 
 async def comfy_entrypoint() -> ComfyExtension:

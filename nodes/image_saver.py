@@ -9,7 +9,7 @@ from typing import Any, Mapping
 import folder_paths
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, PngImagePlugin
 from comfy_api.latest import io as c_io
 
 from .. import const as Const
@@ -22,9 +22,17 @@ from ..utils import cast as Cast
 from ..utils import exif as Exif
 
 _OUTPUT_SUBDIR_OPTIONS = ("none", "year", "year_month", "iso_week", "year_month_day")
+_OUTPUT_FORMAT_OPTIONS = ("webp", "png")
+_DEFAULT_OUTPUT_FORMAT = "webp"
 _WEBP_METHOD = 6
 _WEBP_LOSSLESS_QUALITY = 80
 _WEBP_EXT = ".webp"
+_PNG_EXT = ".png"
+_OUTPUT_FORMAT_EXTENSIONS = {
+    "webp": _WEBP_EXT,
+    "png": _PNG_EXT,
+}
+_OUTPUT_IMAGE_EXTS = tuple(_OUTPUT_FORMAT_EXTENSIONS.values())
 _MISSING = object()
 _INVALID_FILE_STEM_CHARS = set('<>:"|?*')
 _WINDOWS_RESERVED_BASENAMES = {
@@ -172,7 +180,7 @@ def _find_next_counter(folder: Path, date_prefix: str) -> int:
         name = entry.name
         if not name.startswith(expected_prefix):
             continue
-        if not name.lower().endswith(_WEBP_EXT):
+        if Path(name).suffix.lower() not in _OUTPUT_IMAGE_EXTS:
             continue
 
         rest = name[len(expected_prefix):]
@@ -235,7 +243,20 @@ def _validate_file_stem(value: Any) -> str:
     return stem
 
 
-def _resolve_forced_file_stems(raw: Any, image_count: int) -> list[str] | None:
+def _resolve_output_format(raw: Any) -> str:
+    if raw is _MISSING or raw is None:
+        return _DEFAULT_OUTPUT_FORMAT
+
+    value = _resolve_single_input(raw, "output_format")
+    text = str(value or _DEFAULT_OUTPUT_FORMAT).strip().lower()
+    if not text:
+        text = _DEFAULT_OUTPUT_FORMAT
+    if text not in _OUTPUT_FORMAT_OPTIONS:
+        raise ValueError(f"unsupported output_format: {text}")
+    return text
+
+
+def _resolve_forced_file_stems(raw: Any, image_count: int, output_ext: str = _WEBP_EXT) -> list[str] | None:
     values = _normalize_optional_file_stem_values(raw)
     if values is None:
         return None
@@ -252,7 +273,7 @@ def _resolve_forced_file_stems(raw: Any, image_count: int) -> list[str] | None:
         stem = _validate_file_stem(raw_stem)
         key = stem.casefold()
         if key in seen:
-            raise ValueError(f"duplicate output file path in batch: {stem}{_WEBP_EXT}")
+            raise ValueError(f"duplicate output file path in batch: {stem}{output_ext}")
         seen.add(key)
         stems.append(stem)
     return stems
@@ -312,6 +333,18 @@ def _build_webp_save_kwargs(quality: int, infotext: str) -> dict[str, Any]:
     return kwargs
 
 
+def _build_png_save_kwargs(infotext: str) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "format": "PNG",
+        "compress_level": 4,
+    }
+    if infotext:
+        pnginfo = PngImagePlugin.PngInfo()
+        pnginfo.add_text("parameters", infotext)
+        kwargs["pnginfo"] = pnginfo
+    return kwargs
+
+
 class ImageSaver(c_io.ComfyNode):
     @classmethod
     def define_schema(cls) -> c_io.Schema:
@@ -340,7 +373,7 @@ class ImageSaver(c_io.ComfyNode):
                     "file_stem",
                     optional=True,
                     force_input=True,
-                    tooltip="Optional output filename stem list; when connected, save as <file_stem>.webp",
+                    tooltip="Optional output filename stem list; when connected, save as <file_stem>.<format>",
                 ),
                 c_io.String.Input(
                     "caption",
@@ -371,6 +404,13 @@ class ImageSaver(c_io.ComfyNode):
                     "write_caption",
                     default=False,
                     tooltip="Write caption txt file",
+                ),
+                c_io.Combo.Input(
+                    "output_format",
+                    display_name="format",
+                    options=list(_OUTPUT_FORMAT_OPTIONS),
+                    default=_DEFAULT_OUTPUT_FORMAT,
+                    tooltip="Output image file format",
                 ),
             ],
             outputs=[
@@ -404,18 +444,22 @@ class ImageSaver(c_io.ComfyNode):
         output_subdir: Any = _MISSING,
         quality: Any = _MISSING,
         write_caption: Any = _MISSING,
+        output_format: Any = _DEFAULT_OUTPUT_FORMAT,
     ) -> c_io.NodeOutput:
         image_batch_items, _ = _split_images_from_input(image)
         image_count = len(image_batch_items)
         if image_count == 0:
             raise ValueError("image is required")
 
+        output_format_value = _resolve_output_format(output_format)
+        output_ext = _OUTPUT_FORMAT_EXTENSIONS[output_format_value]
+
         image_info_values = _unwrap_input_list(image_info)
         image_info_mapped = _resolve_per_image_values(image_info_values, image_count, "image_info")
 
         caption_values = _normalize_caption_values(caption)
         caption_mapped = _resolve_per_image_values(caption_values, image_count, "caption")
-        forced_file_stems = _resolve_forced_file_stems(file_stem, image_count)
+        forced_file_stems = _resolve_forced_file_stems(file_stem, image_count, output_ext)
 
         if filename_suffix is _MISSING and forced_file_stems is None:
             raise ValueError("filename_suffix is required")
@@ -423,14 +467,16 @@ class ImageSaver(c_io.ComfyNode):
             raise ValueError("output_dir is required")
         if output_subdir is _MISSING:
             raise ValueError("output_subdir is required")
-        if quality is _MISSING:
+        if quality is _MISSING and output_format_value == "webp":
             raise ValueError("quality is required")
         if write_caption is _MISSING:
             raise ValueError("write_caption is required")
 
         output_dir_value = _resolve_single_input(output_dir, "output_dir")
         output_subdir_value = str(_resolve_single_input(output_subdir, "output_subdir"))
-        quality_value = int(_resolve_single_input(quality, "quality"))
+        quality_value = 100
+        if quality is not _MISSING:
+            quality_value = int(_resolve_single_input(quality, "quality"))
         write_caption_value = bool(_resolve_single_input(write_caption, "write_caption"))
         suffix = ""
         if forced_file_stems is None:
@@ -459,12 +505,15 @@ class ImageSaver(c_io.ComfyNode):
                 stem = _render_file_stem(date_prefix, counter, suffix)
             else:
                 stem = forced_file_stems[idx]
-            image_path = target_dir / f"{stem}{_WEBP_EXT}"
+            image_path = target_dir / f"{stem}{output_ext}"
             info_item = image_info_mapped[idx]
             infotext = _build_infotext(info_item)
 
             img = _to_pil(image_item)
-            save_kwargs = _build_webp_save_kwargs(quality_value, infotext)
+            if output_format_value == "png":
+                save_kwargs = _build_png_save_kwargs(infotext)
+            else:
+                save_kwargs = _build_webp_save_kwargs(quality_value, infotext)
             try:
                 img.save(image_path, **save_kwargs)
             except Exception as exc:
@@ -475,7 +524,7 @@ class ImageSaver(c_io.ComfyNode):
                     with Image.open(image_path) as reloaded:
                         loaded_infotext = Exif.extract_a1111_text(reloaded)
                     if loaded_infotext is None:
-                        raise RuntimeError("missing infotext in saved webp metadata")
+                        raise RuntimeError(f"missing infotext in saved {output_format_value} metadata")
                 except Exception as exc:
                     raise RuntimeError(f"failed to validate infotext metadata: {image_path}") from exc
 

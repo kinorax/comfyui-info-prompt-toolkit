@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .file_hash_cache import normalize_relative_path
+from .model_merge import is_model_merge_value
 from .model_lora_metadata_pipeline import ModelLoraMetadataPipeline, get_shared_metadata_pipeline
 
 try:
@@ -110,6 +111,8 @@ def _hash_model(
 ) -> str | None:
     if not isinstance(model_value, Mapping):
         return None
+    if is_model_merge_value(model_value):
+        return None
 
     folder_name = _as_text(model_value.get("folder_paths"))
     model_name = _as_text(model_value.get("name"))
@@ -139,6 +142,8 @@ def _hash_model_with_optional_folder_fallback(
     pipeline: ModelLoraMetadataPipeline,
     option_cache: dict[str, tuple[str, ...]],
 ) -> str | None:
+    if is_model_merge_value(model_like_value):
+        return None
     if isinstance(model_like_value, Mapping):
         folder_name = _as_text(model_like_value.get("folder_paths"))
         model_like_name = _as_text(model_like_value.get("name"))

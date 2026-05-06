@@ -1,7 +1,7 @@
 [project]
 name = "info-prompt-toolkit"
-version = "1.0.0"
-description = "Civitai-compatible metadata saving, same-name .txt captions, XY Plot, Tiled Sampling, SAM3, Detailer, PixAI Tagger, wildcards, and Dynamic Prompts to simplify ComfyUI wiring, improve reusability, and carry trial results into the next production pass."
+version = "1.1.0"
+description = "Civitai-compatible metadata saving, same-name .txt captions, XY Plot, Tiled Sampling, SAM3, Detailer, PixAI Tagger, wildcards, Dynamic Prompts, and A1111 infotext/image_info reuse to simplify ComfyUI wiring, improve reusability, and carry trial results into the next production pass."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"

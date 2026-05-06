@@ -1,6 +1,7 @@
 # Copyright 2026 kinorax
 from __future__ import annotations
 
+import importlib
 import time
 from threading import Lock
 
@@ -9,6 +10,7 @@ from comfy_api.latest import io as c_io
 from .. import const as Const
 from ..utils import cast as Cast
 from ..utils.model_lora_metadata_pipeline import get_shared_metadata_pipeline
+from ..utils.model_merge import model_merge_payload_or_none
 from ..utils.model_runtime_settings import clip_last_layer_from_settings, sd3_shift_from_settings
 from ._runtime_loader import (
     CHECKPOINT_LOADER_KEYS,
@@ -27,11 +29,13 @@ from ._runtime_loader import (
     load_diffusion_model_with_core_loader,
     load_vae_with_core_loader,
     loader_class_or_none,
+    loader_method_or_none,
     normalized_clip_device_or_none,
     normalized_clip_last_layer_or_none,
     normalized_clip_names,
     normalized_clip_payload_or_none,
     normalized_clip_type_or_none,
+    normalized_model_folder_or_none,
     normalized_model_name_or_none,
     normalized_model_weight_dtype_or_none,
     normalized_vae_name_or_none,
@@ -44,6 +48,9 @@ VAE_RUNTIME_TYPE = c_io.Custom("VAE")
 _VAE_CACHE_LOCK = Lock()
 _LAST_VAE_NAME: str | None = None
 _LAST_VAE_RUNTIME: object | None = None
+
+MODEL_MERGE_SIMPLE_KEYS: tuple[str, ...] = ("ModelMergeSimple",)
+CLIP_MERGE_SIMPLE_KEYS: tuple[str, ...] = ("CLIPMergeSimple",)
 
 
 def _load_cached_vae(vae_name: str, core_nodes_module: object) -> object:
@@ -153,6 +160,189 @@ def _load_diffusion_clip(core_nodes_module: object, clip: object) -> object | No
     )
 
 
+def _model_merging_module_or_none() -> object | None:
+    try:
+        return importlib.import_module("comfy_extras.nodes_model_merging")
+    except Exception:
+        return None
+
+
+def _merge_node_class_or_none(keys: tuple[str, ...]) -> type | None:
+    module = _model_merging_module_or_none()
+    if module is None:
+        return None
+    return loader_class_or_none(module, keys)
+
+
+def _first_result_value(result: object) -> object:
+    if isinstance(result, (list, tuple)):
+        return result[0] if result else None
+    return result
+
+
+def _call_merge_node(
+    node_class: type,
+    *,
+    error_prefix: str,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    method = loader_method_or_none(node_class(), ("merge",))
+    if method is None:
+        raise RuntimeError(f"{error_prefix} function is unavailable")
+
+    try:
+        return method(*args)
+    except TypeError:
+        return method(**kwargs)
+
+
+def _apply_model_merge_simple(model1: object, model2: object, ratio: float) -> object:
+    node_class = _merge_node_class_or_none(MODEL_MERGE_SIMPLE_KEYS)
+    if node_class is None:
+        raise RuntimeError("ModelMergeSimple node is unavailable")
+
+    result = _call_merge_node(
+        node_class,
+        error_prefix="ModelMergeSimple",
+        args=(model1, model2, ratio),
+        kwargs={
+            "model1": model1,
+            "model2": model2,
+            "ratio": ratio,
+        },
+    )
+    return _first_result_value(result)
+
+
+def _apply_clip_merge_simple(clip1: object, clip2: object, ratio: float) -> object:
+    node_class = _merge_node_class_or_none(CLIP_MERGE_SIMPLE_KEYS)
+    if node_class is None:
+        raise RuntimeError("CLIPMergeSimple node is unavailable")
+
+    result = _call_merge_node(
+        node_class,
+        error_prefix="CLIPMergeSimple",
+        args=(clip1, clip2, ratio),
+        kwargs={
+            "clip1": clip1,
+            "clip2": clip2,
+            "ratio": ratio,
+        },
+    )
+    return _first_result_value(result)
+
+
+def _ratio_or_default(value: object, default: float) -> float:
+    try:
+        parsed = float(value)
+    except Exception:
+        parsed = float(default)
+    if parsed < 0.0:
+        return 0.0
+    if parsed > 1.0:
+        return 1.0
+    return parsed
+
+
+def _load_checkpoint_bundle(model: object, core_nodes_module: object) -> tuple[object, object | None, object | None]:
+    model_name = normalized_model_name_or_none(model)
+    if model_name is None:
+        raise RuntimeError("model is required")
+
+    checkpoint_loader_class = loader_class_or_none(core_nodes_module, CHECKPOINT_LOADER_KEYS)
+    if checkpoint_loader_class is None:
+        raise RuntimeError("Load Checkpoint node is unavailable")
+
+    runtime_settings = _runtime_settings_for_model(model)
+    runtime_model, runtime_clip, runtime_vae = load_checkpoint_with_core_loader(
+        checkpoint_loader_class(),
+        model_name,
+    )
+    runtime_clip = _apply_clip_last_layer_if_needed(
+        core_nodes_module,
+        runtime_clip,
+        clip_last_layer_from_settings(runtime_settings),
+    )
+    runtime_model = _apply_model_sampling_sd3_if_needed(
+        core_nodes_module,
+        runtime_model,
+        sd3_shift_from_settings(runtime_settings),
+    )
+    return runtime_model, runtime_clip, runtime_vae
+
+
+def _load_diffusion_model_bundle(model: object, core_nodes_module: object) -> tuple[object, None, None]:
+    model_name = normalized_model_name_or_none(model)
+    if model_name is None:
+        raise RuntimeError("model is required")
+
+    diffusion_loader_class = loader_class_or_none(core_nodes_module, DIFFUSION_MODEL_LOADER_KEYS)
+    if diffusion_loader_class is None:
+        raise RuntimeError("Load Diffusion Model node is unavailable")
+
+    runtime_settings = _runtime_settings_for_model(model)
+    runtime_model = load_diffusion_model_with_core_loader(
+        diffusion_loader_class(),
+        model_name,
+        weight_dtype=normalized_model_weight_dtype_or_none(model),
+    )
+    runtime_model = _apply_model_sampling_sd3_if_needed(
+        core_nodes_module,
+        runtime_model,
+        sd3_shift_from_settings(runtime_settings),
+    )
+    return runtime_model, None, None
+
+
+def _load_raw_model_bundle(model: object, core_nodes_module: object) -> tuple[object, object | None, object | None]:
+    if is_checkpoint_model(model):
+        return _load_checkpoint_bundle(model, core_nodes_module)
+    if is_diffusion_model(model):
+        return _load_diffusion_model_bundle(model, core_nodes_module)
+    raise RuntimeError("Only checkpoint and diffusion_models are supported")
+
+
+def _load_model_bundle(model: object, core_nodes_module: object) -> tuple[object, object | None, object | None]:
+    merge_payload = model_merge_payload_or_none(model)
+    if merge_payload is None:
+        return _load_raw_model_bundle(model, core_nodes_module)
+
+    base_model = merge_payload.get(Const.MODEL_MERGE_BASE_MODEL_KEY)
+    merge_model = merge_payload.get(Const.MODEL_MERGE_MODEL_KEY)
+    base_folder = normalized_model_folder_or_none(base_model)
+    merge_folder = normalized_model_folder_or_none(merge_model)
+
+    if base_folder not in (
+        Const.MODEL_FOLDER_PATH_CHECKPOINTS,
+        Const.MODEL_FOLDER_PATH_DIFFUSION_MODELS,
+    ):
+        raise RuntimeError("Merged IPT-Model base_model must use checkpoints or diffusion_models")
+    if merge_folder != base_folder:
+        raise RuntimeError("Merged IPT-Model must not mix checkpoints and diffusion_models")
+
+    base_runtime_model, base_runtime_clip, base_runtime_vae = _load_model_bundle(base_model, core_nodes_module)
+    merge_runtime_model, merge_runtime_clip, _ = _load_model_bundle(merge_model, core_nodes_module)
+
+    merged_model = _apply_model_merge_simple(
+        base_runtime_model,
+        merge_runtime_model,
+        _ratio_or_default(merge_payload.get(Const.MODEL_MERGE_MODEL_RATIO_KEY), 1.0),
+    )
+
+    if base_folder == Const.MODEL_FOLDER_PATH_CHECKPOINTS:
+        if base_runtime_clip is None or merge_runtime_clip is None:
+            raise RuntimeError("Checkpoint merges require CLIP runtime on both sides")
+        merged_clip = _apply_clip_merge_simple(
+            base_runtime_clip,
+            merge_runtime_clip,
+            _ratio_or_default(merge_payload.get(Const.MODEL_MERGE_CLIP_RATIO_KEY), 1.0),
+        )
+        return merged_model, merged_clip, base_runtime_vae
+
+    return merged_model, None, None
+
+
 class LoadNewModel(c_io.ComfyNode):
     @classmethod
     def define_schema(cls) -> c_io.Schema:
@@ -242,49 +432,9 @@ class LoadNewModel(c_io.ComfyNode):
         if core_nodes_module is None:
             raise RuntimeError("ComfyUI core nodes module is unavailable")
 
-        runtime_settings = _runtime_settings_for_model(model)
-        runtime_model: object
-        runtime_clip: object | None = None
-        runtime_vae: object | None = None
-
-        if is_checkpoint_model(model):
-            checkpoint_loader_class = loader_class_or_none(core_nodes_module, CHECKPOINT_LOADER_KEYS)
-            if checkpoint_loader_class is None:
-                raise RuntimeError("Load Checkpoint node is unavailable")
-
-            runtime_model, runtime_clip, runtime_vae = load_checkpoint_with_core_loader(
-                checkpoint_loader_class(),
-                model_name,
-            )
-            runtime_clip = _apply_clip_last_layer_if_needed(
-                core_nodes_module,
-                runtime_clip,
-                clip_last_layer_from_settings(runtime_settings),
-            )
-            runtime_model = _apply_model_sampling_sd3_if_needed(
-                core_nodes_module,
-                runtime_model,
-                sd3_shift_from_settings(runtime_settings),
-            )
-        elif is_diffusion_model(model):
-            diffusion_loader_class = loader_class_or_none(core_nodes_module, DIFFUSION_MODEL_LOADER_KEYS)
-            if diffusion_loader_class is None:
-                raise RuntimeError("Load Diffusion Model node is unavailable")
-
-            runtime_model = load_diffusion_model_with_core_loader(
-                diffusion_loader_class(),
-                model_name,
-                weight_dtype=normalized_model_weight_dtype_or_none(model),
-            )
-            runtime_model = _apply_model_sampling_sd3_if_needed(
-                core_nodes_module,
-                runtime_model,
-                sd3_shift_from_settings(runtime_settings),
-            )
-            if clip is not None:
-                runtime_clip = _load_diffusion_clip(core_nodes_module, clip)
-        else:
-            raise RuntimeError("Only checkpoint and diffusion_models are supported")
+        runtime_model, runtime_clip, runtime_vae = _load_model_bundle(model, core_nodes_module)
+        if is_diffusion_model(model) and clip is not None:
+            runtime_clip = _load_diffusion_clip(core_nodes_module, clip)
 
         explicit_vae = _resolve_vae_runtime(vae, core_nodes_module)
         if explicit_vae is not None:

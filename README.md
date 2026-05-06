@@ -136,7 +136,7 @@ Article: [ComfyUI SDXL & Anima Workflow: Automatic Detailer, XY Plot, Caption Fi
 <a href="assets/readme/image-reader-and-image-saver.webp"><img align="left" hspace="16" src="assets/readme/image-reader-and-image-saver.webp" alt="Image Reader and Image Saver" width="210"></a>
 <ul>
   <li><code>Image Reader</code> and <code>Image Saver</code> are core nodes that support reusable workflows for images that retain generation data (<code>A1111 infotext</code> / <code>image_info</code>).</li>
-  <li><code>Image Saver</code> can embed <code>A1111 infotext</code> into WebP metadata in a format that is easier for Civitai Post images to recognize prompt, model, and multiple LoRA references.</li>
+  <li><code>Image Saver</code> can save WebP or PNG images and embeds <code>A1111 infotext</code> into matching image metadata so prompt, model, and multiple LoRA references remain reusable.</li>
   <li><code>Check Referenced Models...</code> in the <code>Image Reader</code> right-click menu parses referenced entries from image infotext and lists Model / Refiner / Detailer / CLIP / VAE / LoRA items.</li>
   <li>The same window also shows local availability for each reference (Present / Missing), and can jump to <code>View Model Info...</code> for deeper inspection.</li>
   <li><code>Image Saver</code> supports both automatic serial naming and explicit <code>file_stem</code> naming, so you can switch naming strategy by workflow.</li>
@@ -204,6 +204,20 @@ Article: [ComfyUI SDXL & Anima Workflow: Automatic Detailer, XY Plot, Caption Fi
   <li>Supported targets are checkpoint-based and diffusion_models-based models.</li>
 </ul>
 <br clear="left">
+
+## Workflow Examples
+
+### Save Images With Metadata Using `Image Saver`
+
+<a href="assets/readme/wf-sample1.webp"><img src="assets/readme/wf-sample1.webp" alt="Workflow sample: save images with metadata using Image Saver" width="900"></a>
+
+Use `Image Saver` at the end of a generation workflow to save images with reusable metadata. The embedded `A1111 infotext` / `image_info` keeps prompt, model, LoRA, sampler, and related settings available for later reuse.
+
+### Generate From Metadata Loaded by `Image Reader`
+
+<a href="assets/readme/wf-sample2.webp"><img src="assets/readme/wf-sample2.webp" alt="Workflow sample: generate from metadata loaded by Image Reader" width="900"></a>
+
+Load a metadata-rich image with `Image Reader`, pass the restored `image_info` into the workflow, and generate from the saved settings as a starting point for reproduction or further iteration.
 
 ## License
 

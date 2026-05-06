@@ -13,6 +13,7 @@ from comfy_api.latest import io as c_io
 from .. import const as Const
 from ..utils import cast as Cast
 from ..utils.model_lora_metadata_pipeline import get_shared_metadata_pipeline
+from ..utils.model_merge import model_runtime_settings_tree
 from ._runtime_loader import (
     cache_descriptor,
     is_checkpoint_model,
@@ -108,6 +109,13 @@ def _runtime_settings_for_model(model: object) -> dict[str, int | float]:
     )
 
 
+def _runtime_settings_tree_for_model(model: object) -> dict[str, object]:
+    return model_runtime_settings_tree(
+        model,
+        lambda payload: _runtime_settings_for_model(payload),
+    )
+
+
 def _cache_key(
     model: object,
     lora_stack_items: list[tuple[str, float]],
@@ -117,7 +125,7 @@ def _cache_key(
     payload = {
         "model": cache_descriptor(model),
         "lora_stack": _to_lora_stack_payload(lora_stack_items),
-        "runtime_settings": _runtime_settings_for_model(model),
+        "runtime_settings": _runtime_settings_tree_for_model(model),
     }
 
     if is_checkpoint_model(model):

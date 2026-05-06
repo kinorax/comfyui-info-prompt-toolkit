@@ -133,7 +133,7 @@ pip install -r requirements.txt
 <a href="assets/readme/image-reader-and-image-saver.webp"><img align="left" hspace="16" src="assets/readme/image-reader-and-image-saver.webp" alt="Image Reader and Image Saver" width="210"></a>
 <ul>
   <li><code>Image Reader</code> と <code>Image Saver</code> は、生成情報（<code>A1111 infotext</code> / <code>image_info</code>）を保持した画像の再利用ワークフローを支える中核ノードです。</li>
-  <li><code>Image Saver</code> は Civitai の Post images で prompt / model / 複数 LoRA を認識させやすい <code>A1111 infotext</code> を WebP メタデータへ埋め込めます。</li>
+  <li><code>Image Saver</code> は WebP / PNG 保存を選べ、prompt / model / 複数 LoRA を再利用しやすい <code>A1111 infotext</code> を各形式のメタデータへ埋め込めます。</li>
   <li><code>Image Reader</code> の右クリックメニュー <code>Check Referenced Models...</code> では、画像内 infotext から参照情報を解析し、Model / Refiner / Detailer / CLIP / VAE / LoRA を一覧確認できます。</li>
   <li>同画面では各参照のローカル存在状態（Present / Missing）も確認でき、必要に応じて <code>View Model Info...</code> へ遷移して詳細を確認できます。</li>
   <li><code>Image Saver</code> は自動連番と <code>file_stem</code> 指定の両方に対応し、運用に合わせて命名方式を切り替えられます。</li>
@@ -201,6 +201,20 @@ pip install -r requirements.txt
   <li>対応対象は checkpoint 系と diffusion_models 系です。</li>
 </ul>
 <br clear="left">
+
+## ワークフロー例
+
+### `Image Saver` でメタデータ付き保存
+
+<a href="assets/readme/wf-sample1.webp"><img src="assets/readme/wf-sample1.webp" alt="Image Saver でメタデータ付き保存を行うワークフロー例" width="900"></a>
+
+生成ワークフローの終端で `Image Saver` を使い、再利用しやすいメタデータ付き画像として保存する例です。埋め込まれた `A1111 infotext` / `image_info` により、prompt、model、LoRA、sampler などの設定を後から参照できます。
+
+### `Image Reader` のメタデータから生成
+
+<a href="assets/readme/wf-sample2.webp"><img src="assets/readme/wf-sample2.webp" alt="Image Reader で読み込んだメタデータをもとに生成するワークフロー例" width="900"></a>
+
+メタデータ付き画像を `Image Reader` で読み込み、復元された `image_info` をワークフローへ渡して生成する例です。過去の設定を起点に、再現や追加調整へ進めやすくなります。
 
 ## License
 
