@@ -21,7 +21,6 @@ from .nodes.lora_selector import LoraSelector
 from .nodes.checkpoint_selector import CheckpointSelector
 from .nodes.use_loaded_model import UseLoadedModel
 from .nodes.load_new_model import LoadNewModel
-# from .nodes.model_merge import ModelMerge
 from .nodes.vae_selector import VaeSelector
 from .nodes.clip_selector import ClipSelector
 from .nodes.dual_clip_selector import DualClipSelector
@@ -47,7 +46,8 @@ from .nodes.prompt.merge_caption_tokens import MergeCaptionTokens
 from .nodes.prompt.remove_caption_tokens import RemoveCaptionTokens
 from .nodes.prompt.remove_prompt_comments import RemovePromptComments
 from .nodes.prompt.normalize_prompt_tokens import NormalizePromptTokens
-from .nodes.prompt.pixai_tagger import PixAITagger
+from .nodes.prompt.oppai_oracle_tagger import OppaiOracleTagger
+from .nodes.prompt.pixai_tagger import PixAITagger, PixAITagger2
 from .nodes.prompt.prompt_template import PromptTemplate
 from .nodes.prompt.strip_prompt_weights import FlattenPromptForCaption
 from .nodes.set_string_extra import SetStringExtra
@@ -116,7 +116,6 @@ class _Extension(ComfyExtension):
             LoraSelector,
             CheckpointSelector,
             LoadNewModel,
-            # ModelMerge,
             UseLoadedModel,
             VaeSelector,
             ClipSelector,
@@ -143,7 +142,9 @@ class _Extension(ComfyExtension):
             RemoveCaptionTokens,
             RemovePromptComments,
             NormalizePromptTokens,
+            OppaiOracleTagger,
             PixAITagger,
+            PixAITagger2,
             PromptTemplate,
             FlattenPromptForCaption,
             SetStringExtra,

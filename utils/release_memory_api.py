@@ -11,7 +11,7 @@ except Exception:  # pragma: no cover - unavailable outside ComfyUI runtime
     web = None  # type: ignore[assignment]
     PromptServer = None  # type: ignore[assignment]
 
-from .release_memory import bool_or_default, release_memory
+from .release_memory import bool_or_default, release_memory, tagger_runtime_or_default
 
 _ROUTES_REGISTERED = False
 
@@ -39,7 +39,11 @@ def _release_options_from_payload(payload: dict[str, Any]) -> dict[str, bool]:
     return {
         "generation_runtime": bool_or_default(payload.get("generation_runtime"), True),
         "sam3_runtime": bool_or_default(payload.get("sam3_runtime"), True),
-        "pixai_tagger_runtime": bool_or_default(payload.get("pixai_tagger_runtime"), True),
+        "tagger_runtime": tagger_runtime_or_default(
+            payload.get("tagger_runtime"),
+            payload.get("pixai_tagger_runtime"),
+            payload.get("oppai_oracle_tagger_runtime"),
+        ),
         "gc_cuda_cleanup": bool_or_default(payload.get("gc_cuda_cleanup"), True),
     }
 

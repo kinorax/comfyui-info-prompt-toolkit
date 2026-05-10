@@ -3,7 +3,7 @@
 # ComfyUI-Info-Prompt-Toolkit
 
 This extension node collection is built around simplifying ComfyUI wiring and improving reusability, so trial results are easier to carry into the next production pass.  
-Key features include Civitai-compatible image metadata saving, same-name `.txt` caption saving, XY Plot, Tiled Sampling (`SDXL (with ControlNet Tile)` and `Anima`), SAM3, Detailer, PixAI Tagger, wildcards, and Dynamic Prompts to strengthen your workflow.
+Key features include Civitai-compatible image metadata saving, same-name `.txt` caption saving, XY Plot, Tiled Sampling (`SDXL (with ControlNet Tile)` and `Anima`), SAM3, Detailer, PixAI Tagger, OppaiOracle Tagger, wildcards, and Dynamic Prompts to strengthen your workflow.
 
 ## Installation
 
@@ -15,7 +15,7 @@ pip install -r requirements.txt
 ```
 Installing via ComfyUI Manager is the easiest option.
 
-> Note: `SAM3 Prompt To Mask` and `PixAI Tagger` require manual placement of model files under `ComfyUI/models` after installation. See the relevant sections in `Core Nodes` for details.
+> Note: `SAM3 Prompt To Mask`, `PixAI Tagger`, and `OppaiOracle Tagger` require manual placement of model files under `ComfyUI/models` after installation. See the relevant sections in `Core Nodes` for details.
 
 ## Support Ongoing Development
 
@@ -110,11 +110,23 @@ Article: [ComfyUI SDXL & Anima Workflow: Automatic Detailer, XY Plot, Caption Fi
 
 <a href="assets/readme/pixai-tagger.webp"><img align="left" hspace="16" src="assets/readme/pixai-tagger.webp" alt="PixAI Tagger" width="210"></a>
 <ul>
-  <li><code>PixAI Tagger</code> estimates <code>general</code> / <code>character</code> / <code>ip</code> tags from images and outputs prompt-ready text.</li>
-  <li>Tag selection is controlled by <code>mode</code>: <code>threshold</code> uses score thresholds, while <code>topk</code> keeps top-ranked tags per category.</li>
-  <li>This node does not depend on <code>onnxruntime</code> or <code>onnxruntime-gpu</code> and runs on a local PyTorch implementation.</li>
-  <li>By avoiding additional ONNX Runtime installation, the design prioritizes resilience against Python environment changes.</li>
-  <li>Place the PixAI Tagger v0.9 bundle (<code>model_v0.9.pth</code> / <code>tags_v0.9_13k.json</code> / <code>char_ip_map.json</code>) in <code>ComfyUI/models/pixai_tagger</code> (download: <a href="https://huggingface.co/pixai-labs/pixai-tagger-v0.9">pixai-labs/pixai-tagger-v0.9</a>).</li>
+  <li><code>PixAI Tagger</code> estimates tags from images and outputs <code>general</code> / <code>character</code> / <code>ip</code>.</li>
+  <li>Tag selection uses <code>threshold_general</code> / <code>threshold_character</code> and <code>max_tags_general</code> / <code>max_tags_character</code>.</li>
+  <li><code>sort_order</code> controls the final display order for <code>general</code> tags only (<code>score</code> / <code>tag_id</code>); <code>character</code> and <code>ip</code> are always output in score order.</li>
+  <li>This node runs on a PyTorch implementation and does not depend on <code>onnxruntime</code> / <code>onnxruntime-gpu</code>, making the setup less susceptible to Python environment changes.</li>
+  <li>Place the PixAI Tagger v0.9 bundle (<code>model_v0.9.pth</code> / <code>tags_v0.9_13k.json</code> / <code>char_ip_map.json</code>) in <code>ComfyUI/models/pixai_tagger</code> or <code>ComfyUI/models/pixai_tagger/v0.9</code> (download: <a href="https://huggingface.co/pixai-labs/pixai-tagger-v0.9">pixai-labs/pixai-tagger-v0.9</a>).</li>
+  <li>The previous released node remains available as <code>PixAI Tagger (Deprecated)</code> for existing workflows.</li>
+</ul>
+<br clear="left">
+
+### OppaiOracle Tagger
+
+<a href="assets/readme/oppai-oracle-tagger.webp"><img align="left" hspace="16" src="assets/readme/oppai-oracle-tagger.webp" alt="OppaiOracle Tagger" width="210"></a>
+<ul>
+  <li><code>OppaiOracle Tagger</code> estimates tags from images and outputs <code>tags</code> / <code>rating</code>.</li>
+  <li>Tag selection uses <code>threshold</code> and <code>max_tags</code>; <code>sort_order</code> controls only the final display order (<code>score</code> / <code>tag_id</code>).</li>
+  <li>This node runs on a PyTorch implementation and does not depend on <code>onnxruntime</code> / <code>onnxruntime-gpu</code>, making the setup less susceptible to Python environment changes.</li>
+  <li>Place the OppaiOracle bundle (<code>model.safetensors</code> / <code>config.json</code> / <code>preprocessing.json</code> / <code>vocabulary.json</code>) in <code>ComfyUI/models/oppai_oracle/V1.1</code> or <code>ComfyUI/models/oppai_oracle/V1.0</code> (download: <a href="https://huggingface.co/Grio43/OppaiOracle">Grio43/OppaiOracle</a>).</li>
 </ul>
 <br clear="left">
 

@@ -19,8 +19,12 @@ const RUNNING_FLAG = "__iptReleaseMemoryRunning";
 const OPTION_WIDGETS = [
     ["generation_runtime", true],
     ["sam3_runtime", true],
-    ["pixai_tagger_runtime", true],
+    ["tagger_runtime", true],
     ["gc_cuda_cleanup", true],
+];
+const LEGACY_TAGGER_WIDGETS = [
+    "pixai_tagger_runtime",
+    "oppai_oracle_tagger_runtime",
 ];
 
 function getNodeTypeCandidates(node) {
@@ -80,11 +84,34 @@ function boolOrDefault(value, defaultValue) {
     return defaultValue;
 }
 
+function readWidgetBoolean(node, widgetName, defaultValue) {
+    const widget = getWidget(node, widgetName);
+    return boolOrDefault(widget?.value, defaultValue);
+}
+
+function readTaggerRuntimeBoolean(node, defaultValue) {
+    const widget = getWidget(node, "tagger_runtime");
+    if (widget) {
+        return boolOrDefault(widget.value, defaultValue);
+    }
+
+    const legacyWidgets = LEGACY_TAGGER_WIDGETS
+        .map((widgetName) => getWidget(node, widgetName))
+        .filter(Boolean);
+    if (legacyWidgets.length === 0) {
+        return defaultValue;
+    }
+
+    return legacyWidgets.some((legacyWidget) => boolOrDefault(legacyWidget.value, defaultValue));
+}
+
 function buildPayload(node) {
     const payload = {};
     for (const [widgetName, defaultValue] of OPTION_WIDGETS) {
-        const widget = getWidget(node, widgetName);
-        payload[widgetName] = boolOrDefault(widget?.value, defaultValue);
+        payload[widgetName] =
+            widgetName === "tagger_runtime"
+                ? readTaggerRuntimeBoolean(node, defaultValue)
+                : readWidgetBoolean(node, widgetName, defaultValue);
     }
     return payload;
 }

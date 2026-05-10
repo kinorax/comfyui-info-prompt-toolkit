@@ -3,7 +3,7 @@
 # ComfyUI-Info-Prompt-Toolkit
 
 ComfyUIの配線の簡素化と再利用性の向上を軸に、試行結果を次の制作へ活かしやすくするための拡張ノード集です。  
-主な機能は、Civitai互換を意識した画像メタデータ保存、同名 `.txt` キャプション保存、XY Plot、Tiled Sampling（`SDXL (with ControlNet Tile)` と `Anima`）、SAM3、Detailer、PixAI Tagger、wildcards、Dynamic Promptsで、ワークフローを強化できます。
+主な機能は、Civitai互換を意識した画像メタデータ保存、同名 `.txt` キャプション保存、XY Plot、Tiled Sampling（`SDXL (with ControlNet Tile)` と `Anima`）、SAM3、Detailer、PixAI Tagger、OppaiOracle Tagger、wildcards、Dynamic Promptsで、ワークフローを強化できます。
 
 ## Installation
 
@@ -15,7 +15,7 @@ pip install -r requirements.txt
 ```
 インストールは ComfyUI Manager 経由が簡単です。
 
-> 注: `SAM3 Prompt To Mask` と `PixAI Tagger` は、インストール後に `ComfyUI/models` 配下へモデルファイルを手動で配置する必要があります。詳細は `Core Nodes` の各説明を参照してください。
+> 注: `SAM3 Prompt To Mask`、`PixAI Tagger`、`OppaiOracle Tagger` は、インストール後に `ComfyUI/models` 配下へモデルファイルを手動で配置する必要があります。詳細は `Core Nodes` の各説明を参照してください。
 
 ## Support Ongoing Development
 
@@ -107,11 +107,23 @@ pip install -r requirements.txt
 
 <a href="assets/readme/pixai-tagger.webp"><img align="left" hspace="16" src="assets/readme/pixai-tagger.webp" alt="PixAI Tagger" width="210"></a>
 <ul>
-  <li><code>PixAI Tagger</code> は、画像から <code>general</code> / <code>character</code> / <code>ip</code> タグを推定し、プロンプト向けテキストとして出力するノードです。</li>
-  <li>タグ選別は <code>mode</code> で切り替えでき、<code>threshold</code> では閾値ベース、<code>topk</code> ではカテゴリごとの上位件数ベースで出力を制御できます。</li>
-  <li>本ノードは <code>onnxruntime</code> / <code>onnxruntime-gpu</code> に依存せず、ローカルの PyTorch 実装で動作します。</li>
-  <li>ONNX Runtime 系の追加導入を避けることで、Python 環境の変化に対して影響を受けにくい構成を重視しています。</li>
-  <li>PixAI Tagger v0.9 バンドル（<code>model_v0.9.pth</code> / <code>tags_v0.9_13k.json</code> / <code>char_ip_map.json</code>）を <code>ComfyUI/models/pixai_tagger</code> に配置してください（取得元: <a href="https://huggingface.co/pixai-labs/pixai-tagger-v0.9">pixai-labs/pixai-tagger-v0.9</a>）。</li>
+  <li><code>PixAI Tagger</code> は、画像からタグを推定し、<code>general</code> / <code>character</code> / <code>ip</code> を出力するノードです。</li>
+  <li>タグ選別は <code>threshold_general</code> / <code>threshold_character</code> と <code>max_tags_general</code> / <code>max_tags_character</code> で制御します。</li>
+  <li><code>sort_order</code> は <code>general</code> タグの最終表示順だけを制御します（<code>score</code> / <code>tag_id</code>）。<code>character</code> と <code>ip</code> は常にスコア順で出力されます。</li>
+  <li>本ノードは PyTorch 実装で動作し、<code>onnxruntime</code> / <code>onnxruntime-gpu</code> に依存しないため、Python 環境の変化による影響を受けにくい構成です。</li>
+  <li>PixAI Tagger v0.9 バンドル（<code>model_v0.9.pth</code> / <code>tags_v0.9_13k.json</code> / <code>char_ip_map.json</code>）を <code>ComfyUI/models/pixai_tagger</code> または <code>ComfyUI/models/pixai_tagger/v0.9</code> に配置してください（取得元: <a href="https://huggingface.co/pixai-labs/pixai-tagger-v0.9">pixai-labs/pixai-tagger-v0.9</a>）。</li>
+  <li>以前リリース済みのノードは、既存ワークフロー互換用に <code>PixAI Tagger (Deprecated)</code> として残しています。</li>
+</ul>
+<br clear="left">
+
+### OppaiOracle Tagger
+
+<a href="assets/readme/oppai-oracle-tagger.webp"><img align="left" hspace="16" src="assets/readme/oppai-oracle-tagger.webp" alt="OppaiOracle Tagger" width="210"></a>
+<ul>
+  <li><code>OppaiOracle Tagger</code> は、画像からタグを推定し、<code>tags</code> / <code>rating</code> を出力するノードです。</li>
+  <li>タグ選別は <code>threshold</code> と <code>max_tags</code> で行い、<code>sort_order</code> は最終的な表示順（<code>score</code> / <code>tag_id</code>）だけを制御します。</li>
+  <li>本ノードは PyTorch 実装で動作し、<code>onnxruntime</code> / <code>onnxruntime-gpu</code> に依存しないため、Python 環境の変化による影響を受けにくい構成です。</li>
+  <li>OppaiOracle バンドル（<code>model.safetensors</code> / <code>config.json</code> / <code>preprocessing.json</code> / <code>vocabulary.json</code>）を <code>ComfyUI/models/oppai_oracle/V1.1</code> または <code>ComfyUI/models/oppai_oracle/V1.0</code> に配置してください（取得元: <a href="https://huggingface.co/Grio43/OppaiOracle">Grio43/OppaiOracle</a>）。</li>
 </ul>
 <br clear="left">
 

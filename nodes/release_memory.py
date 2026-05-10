@@ -9,7 +9,7 @@ from comfy_execution.graph_utils import is_link
 
 from .. import const as Const
 from ..utils import cast as Cast
-from ..utils.release_memory import bool_or_default, release_memory
+from ..utils.release_memory import bool_or_default, release_memory, tagger_runtime_or_default
 
 _MATCH_TEMPLATE = c_io.MatchType.Template("release_memory_passthrough", c_io.AnyType)
 _PASSTHROUGH_INPUT_ID = "passthrough"
@@ -24,13 +24,19 @@ def _summary_text(result: dict[str, Any]) -> str:
 def _release_options(
     generation_runtime: Any,
     sam3_runtime: Any,
-    pixai_tagger_runtime: Any,
+    tagger_runtime: Any,
     gc_cuda_cleanup: Any,
+    pixai_tagger_runtime: Any = None,
+    oppai_oracle_tagger_runtime: Any = None,
 ) -> dict[str, bool]:
     return {
         "generation_runtime": bool_or_default(generation_runtime, True),
         "sam3_runtime": bool_or_default(sam3_runtime, True),
-        "pixai_tagger_runtime": bool_or_default(pixai_tagger_runtime, True),
+        "tagger_runtime": tagger_runtime_or_default(
+            tagger_runtime,
+            pixai_tagger_runtime,
+            oppai_oracle_tagger_runtime,
+        ),
         "gc_cuda_cleanup": bool_or_default(gc_cuda_cleanup, True),
     }
 
@@ -91,9 +97,10 @@ class ReleaseMemory(c_io.ComfyNode):
                     tooltip="Release the SAM3 Prompt To Mask runtime cache",
                 ),
                 c_io.Boolean.Input(
-                    "pixai_tagger_runtime",
+                    "tagger_runtime",
+                    display_name="Tagger Runtime",
                     default=True,
-                    tooltip="Release the PixAI Tagger runtime cache",
+                    tooltip="Release the PixAI Tagger and OppaiOracle Tagger runtime caches",
                 ),
                 c_io.Boolean.Input(
                     "gc_cuda_cleanup",
@@ -120,8 +127,10 @@ class ReleaseMemory(c_io.ComfyNode):
         passthrough: Any = None,
         generation_runtime: Any = True,
         sam3_runtime: Any = True,
-        pixai_tagger_runtime: Any = True,
+        tagger_runtime: Any = None,
         gc_cuda_cleanup: Any = True,
+        pixai_tagger_runtime: Any = None,
+        oppai_oracle_tagger_runtime: Any = None,
     ) -> bool | str:
         return True
 
@@ -131,8 +140,10 @@ class ReleaseMemory(c_io.ComfyNode):
         passthrough: Any = None,
         generation_runtime: Any = True,
         sam3_runtime: Any = True,
-        pixai_tagger_runtime: Any = True,
+        tagger_runtime: Any = None,
         gc_cuda_cleanup: Any = True,
+        pixai_tagger_runtime: Any = None,
+        oppai_oracle_tagger_runtime: Any = None,
     ) -> int:
         return time.time_ns()
 
@@ -142,14 +153,18 @@ class ReleaseMemory(c_io.ComfyNode):
         passthrough: Any = None,
         generation_runtime: Any = True,
         sam3_runtime: Any = True,
-        pixai_tagger_runtime: Any = True,
+        tagger_runtime: Any = None,
         gc_cuda_cleanup: Any = True,
+        pixai_tagger_runtime: Any = None,
+        oppai_oracle_tagger_runtime: Any = None,
     ) -> c_io.NodeOutput:
         requested = _release_options(
             generation_runtime,
             sam3_runtime,
-            pixai_tagger_runtime,
+            tagger_runtime,
             gc_cuda_cleanup,
+            pixai_tagger_runtime,
+            oppai_oracle_tagger_runtime,
         )
 
         after_connected = _input_has_link(

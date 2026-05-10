@@ -23,6 +23,8 @@ _TAGS_FILE_NAME = "tags_v0.9_13k.json"
 _MAPPING_FILE_NAME = "char_ip_map.json"
 _IMAGE_SIZE = 448
 _MODE_OPTIONS = ("threshold", "topk")
+_VARIANT_OPTIONS = ("auto", "v0.9")
+_SORT_ORDER_OPTIONS = ("score", "tag_id")
 _DEVICE_OPTIONS = ("auto", "cuda", "cpu")
 _MODEL_NAME_CANDIDATES = (
     "eva02_large_patch14_448",
@@ -60,13 +62,17 @@ class _TaggingHead(torch.nn.Module):
         return torch.sigmoid(logits)
 
 
-def _candidate_bundle_roots() -> tuple[Path, ...]:
+def _candidate_bundle_roots(variant: object = "auto") -> tuple[Path, ...]:
     roots: list[Path] = []
     models_dir = getattr(folder_paths, "models_dir", None)
     if isinstance(models_dir, str) and models_dir.strip():
         models_root = Path(models_dir).resolve()
-        roots.append(models_root / _PIXAI_DIR_NAME)
-        roots.append(models_root.joinpath(*_WD14_PIXAI_DIR_PARTS))
+        for variant_name in _variant_search_order(variant):
+            if variant_name != "v0.9":
+                continue
+            roots.append(models_root / _PIXAI_DIR_NAME)
+            roots.append(models_root / _PIXAI_DIR_NAME / variant_name)
+            roots.append(models_root.joinpath(*_WD14_PIXAI_DIR_PARTS))
 
     deduped: list[Path] = []
     seen: set[str] = set()
@@ -87,25 +93,25 @@ def _bundle_files(bundle_root: Path) -> tuple[Path, Path, Path]:
     )
 
 
-def _find_bundle_root() -> Path | None:
-    for bundle_root in _candidate_bundle_roots():
+def _find_bundle_root(variant: object = "auto") -> Path | None:
+    for bundle_root in _candidate_bundle_roots(variant):
         weights_path, tags_path, mapping_path = _bundle_files(bundle_root)
         if weights_path.is_file() and tags_path.is_file() and mapping_path.is_file():
             return bundle_root
     return None
 
 
-def _describe_search_roots() -> str:
-    roots = _candidate_bundle_roots()
+def _describe_search_roots(variant: object = "auto") -> str:
+    roots = _candidate_bundle_roots(variant)
     if not roots:
         return "ComfyUI models directory is unavailable"
     return ", ".join(root.as_posix() for root in roots)
 
 
-def _missing_bundle_message() -> str:
+def _missing_bundle_message(variant: object = "auto") -> str:
     return (
         "PixAI tagger bundle was not found. "
-        f"Search roots: {_describe_search_roots()}. "
+        f"Search roots: {_describe_search_roots(variant)}. "
         "Required files per directory: "
         f"{_WEIGHTS_FILE_NAME}, {_TAGS_FILE_NAME}, {_MAPPING_FILE_NAME}"
     )
@@ -122,6 +128,39 @@ def _is_valid_mode(value: object) -> bool:
     if value is None:
         return True
     return str(value).strip().lower() in _MODE_OPTIONS
+
+
+def _normalized_variant(value: object) -> str:
+    text = str(value).strip().lower() if value is not None else _VARIANT_OPTIONS[0]
+    if text == "v0.9":
+        return "v0.9"
+    return "auto"
+
+
+def _variant_search_order(value: object) -> tuple[str, ...]:
+    variant = _normalized_variant(value)
+    if variant == "auto":
+        return ("v0.9",)
+    return (variant,)
+
+
+def _is_valid_variant(value: object) -> bool:
+    if value is None:
+        return True
+    return str(value).strip().lower() in _VARIANT_OPTIONS
+
+
+def _normalized_sort_order(value: object) -> str:
+    text = str(value).strip().lower() if value is not None else _SORT_ORDER_OPTIONS[0]
+    if text == "tag_id":
+        return "tag_id"
+    return "score"
+
+
+def _is_valid_sort_order(value: object) -> bool:
+    if value is None:
+        return True
+    return str(value).strip().lower() in _SORT_ORDER_OPTIONS
 
 
 @lru_cache(maxsize=1)
@@ -546,6 +585,136 @@ def _result_item(
     return output
 
 
+def _score_limited_index_score_tensors(
+    indices: torch.Tensor,
+    scores: torch.Tensor,
+    *,
+    max_tags: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if scores.numel() > 0:
+        order = _argsort_descending(scores)
+        indices = indices.index_select(0, order)
+        scores = scores.index_select(0, order)
+    tag_limit = max(0, int(max_tags))
+    return indices[:tag_limit], scores[:tag_limit]
+
+
+def _selected_indices_and_scores_v2(
+    probs: torch.Tensor,
+    metadata: _BundleMetadata,
+    *,
+    threshold_general: float,
+    threshold_character: float,
+    max_tags_general: int,
+    max_tags_character: int,
+) -> tuple[list[int], list[float], list[int], list[float]]:
+    probs = probs.reshape(-1)
+
+    general_mask = probs[: metadata.gen_tag_count] >= float(threshold_general)
+    character_mask = (
+        probs[metadata.gen_tag_count : metadata.gen_tag_count + metadata.character_tag_count]
+        >= float(threshold_character)
+    )
+    general_indices = general_mask.nonzero(as_tuple=True)[0]
+    character_indices = character_mask.nonzero(as_tuple=True)[0] + metadata.gen_tag_count
+    general_scores = probs.index_select(0, general_indices)
+    character_scores = probs.index_select(0, character_indices)
+
+    general_indices, general_scores = _score_limited_index_score_tensors(
+        general_indices,
+        general_scores,
+        max_tags=max_tags_general,
+    )
+    character_indices, character_scores = _score_limited_index_score_tensors(
+        character_indices,
+        character_scores,
+        max_tags=max_tags_character,
+    )
+
+    return (
+        [int(index) for index in general_indices.detach().cpu().tolist()],
+        [float(score) for score in general_scores.detach().float().cpu().tolist()],
+        [int(index) for index in character_indices.detach().cpu().tolist()],
+        [float(score) for score in character_scores.detach().float().cpu().tolist()],
+    )
+
+
+def _sort_general_items_v2(
+    items: list[tuple[int, str, float]],
+    *,
+    sort_order: str,
+) -> list[tuple[int, str, float]]:
+    if _normalized_sort_order(sort_order) == "tag_id":
+        return sorted(items, key=lambda item: item[0])
+    return sorted(items, key=lambda item: (-item[2], item[0]))
+
+
+def _result_item_v2(
+    probs: torch.Tensor,
+    metadata: _BundleMetadata,
+    *,
+    sort_order: str,
+    threshold_general: float,
+    threshold_character: float,
+    max_tags_general: int,
+    max_tags_character: int,
+) -> dict[str, Any]:
+    general_indices, general_scores_raw, character_indices, character_scores_raw = _selected_indices_and_scores_v2(
+        probs,
+        metadata,
+        threshold_general=threshold_general,
+        threshold_character=threshold_character,
+        max_tags_general=max_tags_general,
+        max_tags_character=max_tags_character,
+    )
+
+    general_items: list[tuple[int, str, float]] = []
+    character_items: list[tuple[int, str, float]] = []
+
+    for index, score in zip(general_indices, general_scores_raw):
+        tag = metadata.index_to_tag_map.get(index)
+        if tag is not None:
+            general_items.append((index, tag, score))
+    for index, score in zip(character_indices, character_scores_raw):
+        tag = metadata.index_to_tag_map.get(index)
+        if tag is not None:
+            character_items.append((index, tag, score))
+
+    general_items = _sort_general_items_v2(general_items, sort_order=sort_order)
+    character_items.sort(key=lambda item: (-item[2], item[0]))
+
+    general_tags, general_scores = _formatted_tags_and_scores(general_items)
+    character_tags, character_scores = _formatted_tags_and_scores(character_items)
+
+    ip_score_map: dict[str, float] = {}
+    for _, character_tag, score in character_items:
+        for ip_tag in metadata.character_ip_mapping.get(character_tag, ()):
+            current = ip_score_map.get(ip_tag)
+            if current is None or score > current:
+                ip_score_map[ip_tag] = score
+    formatted_ip_score_map: dict[str, float] = {}
+    for raw_ip_tag, score in ip_score_map.items():
+        formatted_ip_tag = _format_output_tag(raw_ip_tag)
+        current = formatted_ip_score_map.get(formatted_ip_tag)
+        if current is None or score > current:
+            formatted_ip_score_map[formatted_ip_tag] = score
+    ip_tags = [
+        ip_tag
+        for ip_tag, _ in sorted(
+            formatted_ip_score_map.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+    ]
+
+    return {
+        "general": general_tags,
+        "character": character_tags,
+        "ip": ip_tags,
+        "general_scores": general_scores,
+        "character_scores": character_scores,
+    }
+
+
 def _prompt_text_from_tag_batches(tag_batches: list[list[str]]) -> str:
     lines = [", ".join(tags) for tags in tag_batches]
     if len(lines) == 1:
@@ -558,11 +727,12 @@ class PixAITagger(c_io.ComfyNode):
     def define_schema(cls) -> c_io.Schema:
         return c_io.Schema(
             node_id="IPT-PixAITagger",
-            display_name="PixAI Tagger",
+            display_name="PixAI Tagger (Deprecated)",
             category=Const.CATEGORY_PROMPT,
             description=(
                 "Runs the local PixAI Tagger v0.9 bundle from "
-                "ComfyUI models/pixai_tagger/ or models/wd14_tagger/pixai/pixai-labs_pixai-tagger-v0.9/ "
+                "ComfyUI models/pixai_tagger/, models/pixai_tagger/v0.9/, "
+                "or models/wd14_tagger/pixai/pixai-labs_pixai-tagger-v0.9/ "
                 "and returns prompt-ready tags."
             ),
             inputs=[
@@ -764,4 +934,197 @@ class PixAITagger(c_io.ComfyNode):
             _prompt_text_from_tag_batches(character_batches),
             _prompt_text_from_tag_batches(ip_batches),
             json.dumps(result_payload, ensure_ascii=True),
+        )
+
+
+class PixAITagger2(c_io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> c_io.Schema:
+        return c_io.Schema(
+            node_id="IPT-PixAITagger2",
+            display_name="PixAI Tagger",
+            category=Const.CATEGORY_PROMPT,
+            description=(
+                "Runs the local PixAI Tagger v0.9 bundle from "
+                "ComfyUI models/pixai_tagger/, models/pixai_tagger/v0.9/, "
+                "or models/wd14_tagger/pixai/pixai-labs_pixai-tagger-v0.9/ "
+                "and returns prompt-ready tags."
+            ),
+            inputs=[
+                c_io.Image.Input(
+                    "image",
+                    tooltip="Input image batch to classify with the local PixAI tagger bundle.",
+                ),
+                c_io.Combo.Input(
+                    "variant",
+                    options=_VARIANT_OPTIONS,
+                    default=_VARIANT_OPTIONS[0],
+                    tooltip="Model variant to load. auto currently resolves to v0.9.",
+                ),
+                c_io.Combo.Input(
+                    "sort_order",
+                    options=_SORT_ORDER_OPTIONS,
+                    default=_SORT_ORDER_OPTIONS[0],
+                    tooltip="Order for selected general tags. score keeps highest-confidence tags first; tag_id uses vocabulary order. Character and IP outputs keep their existing score order.",
+                ),
+                c_io.Float.Input(
+                    "threshold_general",
+                    default=0.25,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Only general tags with this score or higher are considered.",
+                ),
+                c_io.Float.Input(
+                    "threshold_character",
+                    default=0.85,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Only character tags with this score or higher are considered.",
+                ),
+                c_io.Int.Input(
+                    "max_tags_general",
+                    default=45,
+                    min=0,
+                    max=2048,
+                    tooltip="Maximum general tags returned per image. Selection is score-based before sort_order is applied.",
+                ),
+                c_io.Int.Input(
+                    "max_tags_character",
+                    default=10,
+                    min=0,
+                    max=2048,
+                    tooltip="Maximum character tags returned per image. Character and IP outputs keep their existing score order.",
+                ),
+                c_io.Combo.Input(
+                    "device",
+                    options=_DEVICE_OPTIONS,
+                    default=_DEVICE_OPTIONS[0],
+                    tooltip="Execution device for the local PixAI tagger runtime.",
+                    advanced=True,
+                ),
+            ],
+            outputs=[
+                c_io.String.Output(
+                    Cast.out_id("general"),
+                    display_name="general",
+                ),
+                c_io.String.Output(
+                    Cast.out_id("character"),
+                    display_name="character",
+                ),
+                c_io.String.Output(
+                    Cast.out_id("ip"),
+                    display_name="ip",
+                ),
+            ],
+        )
+
+    @classmethod
+    def validate_inputs(
+        cls,
+        image: Any = None,
+        variant: object = "auto",
+        sort_order: object = "score",
+        threshold_general: object = 0.25,
+        threshold_character: object = 0.85,
+        max_tags_general: object = 45,
+        max_tags_character: object = 10,
+        device: object = "auto",
+    ) -> bool | str:
+        try:
+            threshold_general_value = float(threshold_general)
+            threshold_character_value = float(threshold_character)
+            max_tags_general_value = int(max_tags_general)
+            max_tags_character_value = int(max_tags_character)
+        except Exception:
+            return "threshold_general, threshold_character, max_tags_general, and max_tags_character must be numeric"
+
+        if not 0.0 <= threshold_general_value <= 1.0:
+            return "threshold_general must be between 0.0 and 1.0"
+        if not 0.0 <= threshold_character_value <= 1.0:
+            return "threshold_character must be between 0.0 and 1.0"
+        if max_tags_general_value < 0:
+            return "max_tags_general must be 0 or greater"
+        if max_tags_character_value < 0:
+            return "max_tags_character must be 0 or greater"
+        if not _is_valid_variant(variant):
+            return f"variant must be one of: {', '.join(_VARIANT_OPTIONS)}"
+        if not _is_valid_sort_order(sort_order):
+            return f"sort_order must be one of: {', '.join(_SORT_ORDER_OPTIONS)}"
+
+        if _find_bundle_root(variant) is not None:
+            return True
+        return _missing_bundle_message(variant)
+
+    @classmethod
+    def execute(
+        cls,
+        image: torch.Tensor,
+        variant: str = "auto",
+        sort_order: str = "score",
+        threshold_general: float = 0.25,
+        threshold_character: float = 0.85,
+        max_tags_general: int = 45,
+        max_tags_character: int = 10,
+        device: str = "auto",
+    ) -> c_io.NodeOutput:
+        bundle_root = _find_bundle_root(variant)
+        if bundle_root is None:
+            raise RuntimeError(_missing_bundle_message(variant))
+
+        metadata = _load_bundle_metadata(bundle_root)
+        runtime_device = _normalized_device(device)
+        model, model_name = _load_model(metadata, runtime_device)
+
+        image_tensor = _preprocess_image_input(image)
+        image_tensor = image_tensor.to(runtime_device)
+
+        with torch.inference_mode():
+            probs_batch = model(image_tensor)
+
+        sort_order_value = _normalized_sort_order(sort_order)
+        items: list[dict[str, Any]] = []
+        general_batches: list[list[str]] = []
+        character_batches: list[list[str]] = []
+        ip_batches: list[list[str]] = []
+
+        for probs in probs_batch:
+            item = _result_item_v2(
+                probs,
+                metadata,
+                sort_order=sort_order_value,
+                threshold_general=float(threshold_general),
+                threshold_character=float(threshold_character),
+                max_tags_general=int(max_tags_general),
+                max_tags_character=int(max_tags_character),
+            )
+            items.append(item)
+            general_batches.append(list(item.get("general", ())))
+            character_batches.append(list(item.get("character", ())))
+            ip_batches.append(list(item.get("ip", ())))
+
+        result_payload = {
+            "items": items,
+            "_params": {
+                "variant": _normalized_variant(variant),
+                "sort_order": sort_order_value,
+                "sort_order_scope": "general",
+                "threshold_general": float(threshold_general),
+                "threshold_character": float(threshold_character),
+                "max_tags_general": int(max_tags_general),
+                "max_tags_character": int(max_tags_character),
+                "device": runtime_device,
+                "model_name": model_name,
+                "model_root": metadata.bundle_root.as_posix(),
+            },
+        }
+        # Uncomment to inspect the full PixAI tagger score payload in the console.
+        # print(json.dumps(result_payload, ensure_ascii=True))
+
+        return c_io.NodeOutput(
+            _prompt_text_from_tag_batches(general_batches),
+            _prompt_text_from_tag_batches(character_batches),
+            _prompt_text_from_tag_batches(ip_batches),
         )

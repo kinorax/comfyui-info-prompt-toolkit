@@ -716,7 +716,7 @@ class ModelInfoWindow {
 
     buildTitleText() {
         const label = this.source.relativePath || this.source.nameRaw || this.source.sha256 || "(unresolved reference)";
-        return `${label} (${this.slot.folderName})`;
+        return label;
     }
 
     centerWindow(panel) {

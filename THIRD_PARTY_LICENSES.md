@@ -41,3 +41,11 @@ It is not a full audit of all transitive dependencies in the base ComfyUI enviro
 - Files referenced by this repository include `model_v0.9.pth`, `tags_v0.9_13k.json`, and `char_ip_map.json`.
 - Upstream model page: https://huggingface.co/pixai-labs/pixai-tagger-v0.9
 - Users are responsible for following the upstream model terms and any data-origin notices associated with that model.
+
+### OppaiOracle Bundle
+
+- The OppaiOracle model bundle is not bundled in this repository.
+- The upstream Hugging Face model page currently reports `apache-2.0`.
+- Files referenced by this repository include `model.safetensors`, `config.json`, `preprocessing.json`, and `vocabulary.json` from `V1.1` or `V1.0`.
+- Upstream model page: https://huggingface.co/Grio43/OppaiOracle
+- Users are responsible for following the upstream model terms and reviewing the upstream model-card limitations before using predictions as labels.

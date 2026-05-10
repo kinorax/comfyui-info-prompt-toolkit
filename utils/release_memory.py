@@ -24,6 +24,29 @@ def bool_or_default(value: Any, default: bool) -> bool:
     return default
 
 
+def tagger_runtime_or_default(
+    tagger_runtime: Any = None,
+    pixai_tagger_runtime: Any = None,
+    oppai_oracle_tagger_runtime: Any = None,
+    *,
+    default: bool = True,
+) -> bool:
+    if tagger_runtime is not None:
+        return bool_or_default(tagger_runtime, default)
+
+    has_legacy_value = (
+        pixai_tagger_runtime is not None
+        or oppai_oracle_tagger_runtime is not None
+    )
+    if not has_legacy_value:
+        return default
+
+    return bool_or_default(pixai_tagger_runtime, default) or bool_or_default(
+        oppai_oracle_tagger_runtime,
+        default,
+    )
+
+
 def _append_step(result: dict[str, Any], name: str, **payload: Any) -> None:
     result["steps"].append({"name": name, **payload})
 
@@ -118,6 +141,27 @@ def _release_pixai_tagger_runtime(result: dict[str, Any]) -> None:
     _append_step(result, "pixai_tagger_runtime", cleared_entries=entry_count)
 
 
+def _release_oppai_oracle_tagger_runtime(result: dict[str, Any]) -> None:
+    from ..nodes.prompt import oppai_oracle_tagger
+
+    with oppai_oracle_tagger._MODEL_CACHE_LOCK:
+        entry_count = len(oppai_oracle_tagger._MODEL_CACHE)
+        oppai_oracle_tagger._MODEL_CACHE.clear()
+
+    _append_step(result, "oppai_oracle_tagger_runtime", cleared_entries=entry_count)
+
+
+def _release_tagger_runtime(result: dict[str, Any]) -> None:
+    for name, fn in (
+        ("pixai_tagger_runtime", _release_pixai_tagger_runtime),
+        ("oppai_oracle_tagger_runtime", _release_oppai_oracle_tagger_runtime),
+    ):
+        try:
+            fn(result)
+        except Exception as exc:
+            _append_error(result, name, exc)
+
+
 def _run_python_gc(result: dict[str, Any]) -> None:
     collected = gc.collect()
     _append_step(result, "python_gc", collected_objects=int(collected))
@@ -173,13 +217,19 @@ def release_memory(
     *,
     generation_runtime: Any = True,
     sam3_runtime: Any = True,
-    pixai_tagger_runtime: Any = True,
+    tagger_runtime: Any = None,
     gc_cuda_cleanup: Any = True,
+    pixai_tagger_runtime: Any = None,
+    oppai_oracle_tagger_runtime: Any = None,
 ) -> dict[str, Any]:
     options = {
         "generation_runtime": bool_or_default(generation_runtime, True),
         "sam3_runtime": bool_or_default(sam3_runtime, True),
-        "pixai_tagger_runtime": bool_or_default(pixai_tagger_runtime, True),
+        "tagger_runtime": tagger_runtime_or_default(
+            tagger_runtime,
+            pixai_tagger_runtime,
+            oppai_oracle_tagger_runtime,
+        ),
         "gc_cuda_cleanup": bool_or_default(gc_cuda_cleanup, True),
     }
     result: dict[str, Any] = {
@@ -196,11 +246,8 @@ def release_memory(
             _release_sam3_runtime(result)
         except Exception as exc:
             _append_error(result, "sam3_runtime", exc)
-    if options["pixai_tagger_runtime"]:
-        try:
-            _release_pixai_tagger_runtime(result)
-        except Exception as exc:
-            _append_error(result, "pixai_tagger_runtime", exc)
+    if options["tagger_runtime"]:
+        _release_tagger_runtime(result)
     if options["gc_cuda_cleanup"]:
         try:
             _run_python_gc(result)
