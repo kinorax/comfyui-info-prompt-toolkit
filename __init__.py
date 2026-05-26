@@ -85,6 +85,7 @@ from .utils import image_reader_model_check_api as _image_reader_model_check_api
 from .utils import model_lora_metadata_api as _model_lora_metadata_api  # noqa: F401
 from .utils import prompt_template_wildcards_api as _prompt_template_wildcards_api  # noqa: F401
 from .utils import release_memory_api as _release_memory_api  # noqa: F401
+from .utils import settings_api as _settings_api  # noqa: F401
 from .utils import video_reader_remote_options_api as _video_reader_remote_options_api  # noqa: F401
 from .utils.development_nodes import load_development_node_list as _load_development_node_list
 from .utils.model_lora_metadata_pipeline import get_shared_metadata_pipeline as _get_shared_metadata_pipeline

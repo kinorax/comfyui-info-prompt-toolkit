@@ -23,8 +23,7 @@ A paid note article is available for users who want polished results with less t
 
 Article: [ComfyUI SDXL & Anima Workflow: Automatic Detailer, XY Plot, Caption File Generation, and More](https://note.com/vast_zinnia5253/n/n95a43362d467?hl=en)
 
-- The article is written in Japanese, and starting on Wednesday, May 27, 2026, note offers automatic multilingual translation for articles.
-- The workflow files use English labels throughout.
+The workflow files use English labels throughout.
 
 ## Core Nodes
 
@@ -130,6 +129,18 @@ Article: [ComfyUI SDXL & Anima Workflow: Automatic Detailer, XY Plot, Caption Fi
 </ul>
 <br clear="left">
 
+### Flatten Prompt for Caption / Merge Caption Tokens / Remove Caption Tokens
+
+<a href="assets/readme/caption-nodes.webp"><img align="left" hspace="16" src="assets/readme/caption-nodes.webp" alt="Caption nodes" width="210"></a>
+<ul>
+  <li><code>Flatten Prompt for Caption</code> prepares prompt text for caption files by removing prompt emphasis syntax and weight values, then unescaping escaped parentheses and backslashes.</li>
+  <li><code>Merge Caption Tokens</code> merges <code>start</code> and <code>end</code> caption token strings, removes duplicate tokens, and rebuilds the result as a single-line caption.</li>
+  <li>Caption tokens are split on <code>, </code> and <code>. </code>. Existing order is preserved, and the first occurrence of each token is kept.</li>
+  <li><code>Remove Caption Tokens</code> removes exact token matches from <code>string</code> using the comma-separated <code>remove</code> input, while preserving the remaining token order.</li>
+  <li>These nodes are useful when combining tagger output, handwritten captions, and prompt text before writing caption files.</li>
+</ul>
+<br clear="left">
+
 ### Prompt Template
 
 <a href="assets/readme/prompt-template.webp"><img align="left" hspace="16" src="assets/readme/prompt-template.webp" alt="Prompt Template" width="210"></a>
@@ -208,12 +219,38 @@ Article: [ComfyUI SDXL & Anima Workflow: Automatic Detailer, XY Plot, Caption Fi
 <a href="assets/readme/load-new-model-and-use-loaded-model.webp"><img align="left" hspace="16" src="assets/readme/load-new-model-and-use-loaded-model.webp" alt="Load New Model and Use Loaded Model" width="210"></a>
 <ul>
   <li><code>Load New Model</code> and <code>Use Loaded Model</code> are a paired workflow that separates model loading from model reuse.</li>
-  <li><code>Load New Model</code> loads <code>model</code>, <code>clip</code>, and <code>vae</code> from inputs provided by selector nodes.</li>
+  <li><code>Load New Model</code> receives the selected model from selector nodes such as <code>Checkpoint Selector</code> or <code>Diffusion Model Selector</code>. Checkpoint selections can load <code>model</code>, <code>clip</code>, and <code>vae</code> from the checkpoint; diffusion model selections load the <code>model</code> and use the optional <code>clip</code>, <code>vae</code>, and <code>vae_fallback</code> inputs for the accompanying CLIP/VAE runtime. It uses a temporary strong cache only within the same prompt execution to avoid duplicate raw loads.</li>
+  <li><code>Use Loaded Model</code> keeps the final runtime bundle in a process-local cache keyed by the selected model, runtime settings, <code>lora_stack</code>, and connected <code>clip</code> / <code>vae</code> conditions. On cache hit, the lazy <code>loaded_model</code> / <code>loaded_clip</code> / <code>loaded_vae</code> branch is skipped.</li>
   <li><code>Use Loaded Model</code> applies <code>lora_stack</code> internally by default. Set <code>apply_lora_stack</code> to <code>false</code> if <code>loaded_model</code> and <code>loaded_clip</code> already include the same LoRA application.</li>
   <li>If you want to pass through <code>Lora Stack Lorader</code> or <code>TorchCompile</code>-related nodes before <code>Use Loaded Model</code>, place them after <code>Load New Model</code>, then connect their outputs to <code>loaded_model</code>, <code>loaded_clip</code>, and <code>loaded_vae</code> with <code>apply_lora_stack=false</code>.</li>
-  <li><code>Use Loaded Model</code> switches by condition set (such as <code>model</code> plus <code>lora_stack</code>), which helps reduce duplicate loads when the same setup is reused.</li>
+  <li>Cache behavior is configurable in <code>ComfyUI Settings &gt; Info-Prompt-Toolkit &gt; Use Loaded Model Cache</code>. <code>Auto</code> always keeps the latest entry and prunes older entries by estimated memory size and <code>Memory budget ratio</code>; <code>Fixed</code> keeps up to <code>Max cache entries</code> regardless of the memory budget. <code>Max cache entries</code> defaults to <code>1</code> and can be set from <code>1</code> to <code>9</code>.</li>
+  <li><code>Use cache logging</code> prints cache hit / miss / store / evict / clear messages to the ComfyUI Python console, including estimated memory amounts for store and evict events.</li>
   <li><code>lora_stack</code> matching is order- and strength-sensitive, so changing order or values is treated as a different condition set.</li>
-  <li>Supported targets are checkpoint-based and diffusion_models-based models.</li>
+</ul>
+<br clear="left">
+
+### Release Memory
+
+<a href="assets/readme/release-memory.webp"><img align="left" hspace="16" src="assets/readme/release-memory.webp" alt="Release Memory" width="210"></a>
+<ul>
+  <li><code>Release Memory</code> releases selected persistent runtime references and requests Python / CUDA cleanup after the step connected to <code>after</code> has completed.</li>
+  <li>The <code>after</code> input and <code>then</code> output are pass-through sockets, so the node can be placed near the end of a workflow without changing the data being passed onward.</li>
+  <li><code>Generation Runtime</code> unloads ComfyUI generation models where possible and clears this extension's <code>Use Loaded Model</code> cache and recently loaded VAE runtime.</li>
+  <li><code>SAM3 Runtime</code> clears the SAM3 Prompt To Mask processor cache, while <code>Tagger Runtime</code> clears PixAI Tagger and OppaiOracle Tagger torch model caches.</li>
+  <li><code>GC &amp; CUDA Cleanup</code> runs garbage collection and asks the available CUDA cleanup hooks to release allocator-held memory where possible.</li>
+  <li>The <code>Release Now</code> button performs the same cleanup manually when no prompt is currently running.</li>
+</ul>
+<br clear="left">
+
+### Selector Nodes
+
+<a href="assets/readme/selector-nodes.webp"><img align="left" hspace="16" src="assets/readme/selector-nodes.webp" alt="Selector nodes" width="210"></a>
+<ul>
+  <li>Selector nodes centralize choices for reusable workflow inputs such as checkpoints, diffusion models, LoRAs, CLIP models, VAEs, samplers, and schedulers.</li>
+  <li>Model-related selectors include <code>Checkpoint Selector</code>, <code>Diffusion Model Selector</code>, <code>Unet Model Selector</code>, <code>Lora Selector</code>, <code>Vae Selector</code>, <code>CLIP Selector</code>, <code>Dual CLIP Selector</code>, <code>Triple CLIP Selector</code>, and <code>Quadruple CLIP Selector</code>.</li>
+  <li>Supported model-related selectors provide a right-click <code>View Model Info...</code> action that uses the selected asset's SHA256 as a key to fetch metadata from Civitai and display it in a model information window.</li>
+  <li>For <code>Lora Selector</code>, <code>View Model Info...</code> can also show a LoRA tag list with tag frequencies when metadata has been analyzed for the selected LoRA.</li>
+  <li>Common connection targets include <code>Image Info Defaults</code>, <code>Image Info Context</code>, <code>Load New Model</code>, <code>Use Loaded Model</code>, and <code>XY Plot Modifier</code>.</li>
 </ul>
 <br clear="left">
 

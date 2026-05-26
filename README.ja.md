@@ -127,6 +127,18 @@ pip install -r requirements.txt
 </ul>
 <br clear="left">
 
+### Flatten Prompt for Caption / Merge Caption Tokens / Remove Caption Tokens
+
+<a href="assets/readme/caption-nodes.webp"><img align="left" hspace="16" src="assets/readme/caption-nodes.webp" alt="Caption nodes" width="210"></a>
+<ul>
+  <li><code>Flatten Prompt for Caption</code> は、プロンプトの強調構文と重み指定を取り除き、エスケープされた括弧やバックスラッシュを戻して、キャプションファイル向けの文字列に整えます。</li>
+  <li><code>Merge Caption Tokens</code> は、<code>start</code> と <code>end</code> の caption token 列をマージし、重複 token を除去して1行のキャプションとして再構成します。</li>
+  <li>caption token は <code>, </code> と <code>. </code> で分割されます。順序は保持され、同一 token は最初に出現したものだけを残します。</li>
+  <li><code>Remove Caption Tokens</code> は、カンマ区切りの <code>remove</code> 入力を使って、<code>string</code> から完全一致する token を削除し、残った token の順序を保持します。</li>
+  <li>Tagger 出力、手書きキャプション、プロンプト文字列を組み合わせてからキャプションファイルへ書き出す用途に向いた補助ノードです。</li>
+</ul>
+<br clear="left">
+
 ### Prompt Template
 
 <a href="assets/readme/prompt-template.webp"><img align="left" hspace="16" src="assets/readme/prompt-template.webp" alt="Prompt Template" width="210"></a>
@@ -205,12 +217,38 @@ pip install -r requirements.txt
 <a href="assets/readme/load-new-model-and-use-loaded-model.webp"><img align="left" hspace="16" src="assets/readme/load-new-model-and-use-loaded-model.webp" alt="Load New Model and Use Loaded Model" width="210"></a>
 <ul>
   <li><code>Load New Model</code> と <code>Use Loaded Model</code> は、モデル読み込みと再利用を分担するペアノードです。</li>
-  <li><code>Load New Model</code> は、Selector系ノードから受けた情報をもとに <code>model</code> / <code>clip</code> / <code>vae</code> を読み出します。</li>
+  <li><code>Load New Model</code> は、<code>Checkpoint Selector</code> / <code>Diffusion Model Selector</code> などの Selector系ノードから選択モデルを受け取ります。Checkpoint では checkpoint 由来の <code>model</code> / <code>clip</code> / <code>vae</code> を読み出し、Diffusion Model では <code>model</code> を読み出したうえで、必要な CLIP/VAE runtime は任意入力の <code>clip</code> / <code>vae</code> / <code>vae_fallback</code> で補います。同一プロンプト実行中だけ有効な一時 strong cache を使い、同じ raw load の重複を避けます。</li>
+  <li><code>Use Loaded Model</code> は、選択モデル、runtime settings、<code>lora_stack</code>、接続された <code>clip</code> / <code>vae</code> 条件をキーに、最終 runtime 一式をプロセス内キャッシュへ保持します。cache hit 時は lazy 入力の <code>loaded_model</code> / <code>loaded_clip</code> / <code>loaded_vae</code> 側の分岐を評価しません。</li>
   <li><code>Use Loaded Model</code> は、デフォルトではノード内部で <code>lora_stack</code> を適用します。<code>loaded_model</code> / <code>loaded_clip</code> 側で同じ LoRA 適用を済ませている場合は <code>apply_lora_stack=false</code> にしてください。</li>
   <li><code>Lora Stack Lorader</code> や <code>TorchCompile</code> 系ノードを <code>Use Loaded Model</code> の前段に挟みたい場合は、<code>Load New Model</code> の出力をそれらへ通し、最終出力を <code>loaded_model</code> / <code>loaded_clip</code> / <code>loaded_vae</code> に接続したうえで <code>apply_lora_stack=false</code> を使います。</li>
-  <li><code>Use Loaded Model</code> は、<code>model</code> と <code>lora_stack</code> などの条件組み合わせごとに結果を切り替えるため、同条件での重複読み込みを減らしやすくなります。</li>
+  <li>キャッシュ挙動は <code>ComfyUI Settings &gt; Info-Prompt-Toolkit &gt; Use Loaded Model キャッシュ</code> で設定できます。<code>自動</code> は最新1件を必ず保持し、古いキャッシュを推定メモリサイズと <code>メモリ予算比率</code> に基づいて削除します。<code>固定</code> はメモリ予算を見ず、<code>最大キャッシュ数</code> まで保持します。<code>最大キャッシュ数</code> の既定値は <code>1</code> で、<code>1</code> から <code>9</code> まで設定できます。</li>
+  <li><code>キャッシュログを出力</code> を有効にすると、cache hit / miss / store / evict / clear が ComfyUI の Python コンソールに出力されます。store / evict では推定メモリ量も確認できます。</li>
   <li><code>lora_stack</code> は要素の順序と強度も条件に含まれるため、並び順や値が変わると別条件として扱われます。</li>
-  <li>対応対象は checkpoint 系と diffusion_models 系です。</li>
+</ul>
+<br clear="left">
+
+### Release Memory
+
+<a href="assets/readme/release-memory.webp"><img align="left" hspace="16" src="assets/readme/release-memory.webp" alt="Release Memory" width="210"></a>
+<ul>
+  <li><code>Release Memory</code> は、<code>after</code> に接続した処理の完了後、選択した永続 runtime 参照を解放し、Python / CUDA のクリーンアップを要求するノードです。</li>
+  <li><code>after</code> 入力と <code>then</code> 出力はパススルーなので、ワークフロー末尾付近に置いても、後続へ渡す値そのものは変わりません。</li>
+  <li><code>Generation Runtime</code> は、可能な範囲で ComfyUI の生成モデルをアンロードし、この拡張の <code>Use Loaded Model</code> キャッシュと直近 VAE runtime をクリアします。</li>
+  <li><code>SAM3 Runtime</code> は SAM3 Prompt To Mask の processor cache を、<code>Tagger Runtime</code> は PixAI Tagger と OppaiOracle Tagger の torch model cache をクリアします。</li>
+  <li><code>GC &amp; CUDA Cleanup</code> は garbage collection を実行し、利用可能な CUDA cleanup hook に allocator が保持するメモリの解放を要求します。</li>
+  <li><code>Release Now</code> ボタンから、プロンプト実行中でないときに同じクリーンアップを手動実行できます。</li>
+</ul>
+<br clear="left">
+
+### Selector系ノード
+
+<a href="assets/readme/selector-nodes.webp"><img align="left" hspace="16" src="assets/readme/selector-nodes.webp" alt="Selector系ノード" width="210"></a>
+<ul>
+  <li>Selector系ノードは、checkpoint、diffusion model、LoRA、CLIP、VAE、sampler、scheduler など、ワークフローで再利用したい選択値をまとめて扱うための補助ノード群です。</li>
+  <li>モデル関連の Selector には、<code>Checkpoint Selector</code>、<code>Diffusion Model Selector</code>、<code>Unet Model Selector</code>、<code>Lora Selector</code>、<code>Vae Selector</code>、<code>CLIP Selector</code>、<code>Dual CLIP Selector</code>、<code>Triple CLIP Selector</code>、<code>Quadruple CLIP Selector</code> があります。</li>
+  <li>対応するモデル関連 Selector では、右クリックメニューの <code>View Model Info...</code> から、選択中アセットの SHA256 をキーに Civitai からメタデータを取得し、モデル情報ウィンドウに表示できます。</li>
+  <li><code>Lora Selector</code> の <code>View Model Info...</code> では、選択した LoRA のメタデータ解析が完了している場合、タグ頻度付きの LoRA タグ一覧も表示できます。</li>
+  <li>主な接続先は <code>Image Info Defaults</code>、<code>Image Info Context</code>、<code>Load New Model</code>、<code>Use Loaded Model</code>、<code>XY Plot Modifier</code> です。</li>
 </ul>
 <br clear="left">
 

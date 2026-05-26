@@ -9,16 +9,10 @@ from comfy_execution.graph_utils import is_link
 
 from .. import const as Const
 from ..utils import cast as Cast
-from ..utils.release_memory import bool_or_default, release_memory, tagger_runtime_or_default
+from ..utils.release_memory import bool_or_default, release_memory, release_memory_summary_text, tagger_runtime_or_default
 
 _MATCH_TEMPLATE = c_io.MatchType.Template("release_memory_passthrough", c_io.AnyType)
 _PASSTHROUGH_INPUT_ID = "passthrough"
-
-
-def _summary_text(result: dict[str, Any]) -> str:
-    step_count = len(result.get("steps", ()))
-    error_count = len(result.get("errors", ()))
-    return f"steps={step_count} errors={error_count}"
 
 
 def _release_options(
@@ -181,7 +175,7 @@ class ReleaseMemory(c_io.ComfyNode):
             )
 
         result = release_memory(**requested)
-        print(f"[IPT-ReleaseMemory] ok={bool(result.get('ok'))} {_summary_text(result)}")
+        print(f"[IPT-ReleaseMemory] ok={bool(result.get('ok'))} {release_memory_summary_text(result)}")
         return c_io.NodeOutput(
             passthrough,
             ui={"release_memory": [result]},

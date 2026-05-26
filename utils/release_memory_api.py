@@ -11,7 +11,7 @@ except Exception:  # pragma: no cover - unavailable outside ComfyUI runtime
     web = None  # type: ignore[assignment]
     PromptServer = None  # type: ignore[assignment]
 
-from .release_memory import bool_or_default, release_memory, tagger_runtime_or_default
+from .release_memory import bool_or_default, release_memory, release_memory_summary_text, tagger_runtime_or_default
 
 _ROUTES_REGISTERED = False
 
@@ -48,6 +48,13 @@ def _release_options_from_payload(payload: dict[str, Any]) -> dict[str, bool]:
     }
 
 
+def _safe_print(message: str) -> None:
+    try:
+        print(message)
+    except Exception:
+        pass
+
+
 def register_routes() -> None:
     global _ROUTES_REGISTERED
 
@@ -79,6 +86,7 @@ def register_routes() -> None:
 
         options = _release_options_from_payload(payload)
         result = await asyncio.to_thread(release_memory, **options)
+        _safe_print(f"[IPT-ReleaseMemory] source=button ok={bool(result.get('ok'))} {release_memory_summary_text(result)}")
         return web.json_response(result, status=200 if result.get("ok") else 500)
 
     _ROUTES_REGISTERED = True

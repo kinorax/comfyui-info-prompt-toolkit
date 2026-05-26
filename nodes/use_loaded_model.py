@@ -5,6 +5,7 @@ import hashlib
 import json
 import time
 from collections import OrderedDict
+from dataclasses import dataclass
 from threading import Lock
 
 import comfy.model_management as comfy_model_management
@@ -14,11 +15,16 @@ from .. import const as Const
 from ..utils import cast as Cast
 from ..utils.model_lora_metadata_pipeline import get_shared_metadata_pipeline
 from ..utils.model_merge import model_runtime_settings_tree
+from ..utils.settings import (
+    CACHE_RETENTION_FIXED,
+    get_use_loaded_model_cache_settings,
+)
 from ._runtime_loader import (
     cache_descriptor,
     is_checkpoint_model,
     is_diffusion_model,
     normalized_clip_names,
+    normalized_model_folder_or_none,
     normalized_model_name_or_none,
 )
 from .lora_stack_lorader import LoraStackLorader
@@ -30,12 +36,43 @@ CLIP_RUNTIME_TYPE = c_io.Custom("CLIP")
 VAE_RUNTIME_TYPE = c_io.Custom("VAE")
 
 _CACHE_LOCK = Lock()
-_LAST_CACHE_LIMIT = 2
 _LAST_CACHE: OrderedDict[str, tuple[object, object | None, object | None]] = OrderedDict()
 _LAST_CACHE_BYTES: OrderedDict[str, int] = OrderedDict()
-_CACHE_TWO_ENTRY_BUDGET_RATIO = 0.72
+_LAST_CACHE_UNKNOWN: OrderedDict[str, tuple[str, ...]] = OrderedDict()
 
 _MISSING = object()
+
+
+@dataclass(frozen=True)
+class _RuntimeSize:
+    bytes: int
+    known: bool
+    source: str
+
+
+@dataclass(frozen=True)
+class _BundleSize:
+    model_bytes: int
+    clip_bytes: int
+    vae_bytes: int
+    total_bytes: int
+    unknown_targets: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _StoreCacheResult:
+    bundle_size: _BundleSize
+    retention: str
+    max_entries: int
+    target_limit: int
+    total_memory_bytes: int
+    budget_bytes: int
+    budget_ratio: float
+    recent_total_bytes: int
+    final_total_bytes: int
+    entries: int
+    evicted_entries: tuple[tuple[str, int], ...]
+    reason: str
 
 
 def _bool_or_default(value: object, default: bool) -> bool:
@@ -141,32 +178,93 @@ def _cache_key(
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _runtime_size_bytes(value: object) -> int:
+def _cache_key_label(cache_key: str) -> str:
+    return str(cache_key)[:12]
+
+
+def _model_label(model: object) -> str:
+    name = normalized_model_name_or_none(model) or "unknown"
+    folder = normalized_model_folder_or_none(model) or "unknown"
+    return f"{folder}/{name}"
+
+
+def _format_bytes(value: int) -> str:
+    number = max(0, int(value))
+    gib = 1024 ** 3
+    mib = 1024 ** 2
+    if number >= gib:
+        return f"{number / gib:.2f}GiB"
+    if number >= mib:
+        return f"{number / mib:.1f}MiB"
+    return f"{number}B"
+
+
+def _format_percent(numerator: int, denominator: int) -> str:
+    if denominator <= 0:
+        return "n/a"
+    return f"{(max(0, int(numerator)) / denominator) * 100:.1f}%"
+
+
+def _format_ratio_percent(value: float) -> str:
+    return f"{max(0.0, float(value)) * 100:.0f}%"
+
+
+def _cache_log(message: str) -> None:
+    settings = get_use_loaded_model_cache_settings()
+    if not settings.cache_log_enabled:
+        return
+
+    try:
+        print(f"[IPT][UseLoadedModel][cache] {message}")
+    except Exception:
+        pass
+
+
+def _runtime_size(value: object) -> _RuntimeSize:
     if value is None:
-        return 0
+        return _RuntimeSize(0, True, "none")
 
     get_ram_usage = getattr(value, "get_ram_usage", None)
     if callable(get_ram_usage):
         try:
-            return max(0, int(get_ram_usage()))
+            return _RuntimeSize(max(0, int(get_ram_usage())), True, "get_ram_usage")
         except Exception:
-            return 0
+            return _RuntimeSize(0, False, "get_ram_usage_error")
 
     model_size = getattr(value, "model_size", None)
     if callable(model_size):
         try:
-            return max(0, int(model_size()))
+            return _RuntimeSize(max(0, int(model_size())), True, "model_size")
         except Exception:
-            return 0
+            return _RuntimeSize(0, False, "model_size_error")
 
-    return 0
+    return _RuntimeSize(0, False, "unavailable")
 
 
-def _bundle_size_bytes(model: object, clip: object | None, vae: object | None) -> tuple[int, int, int, int]:
-    model_bytes = _runtime_size_bytes(model)
-    clip_bytes = _runtime_size_bytes(clip)
-    vae_bytes = _runtime_size_bytes(vae)
-    return model_bytes, clip_bytes, vae_bytes, model_bytes + clip_bytes + vae_bytes
+def _bundle_size_bytes(model: object, clip: object | None, vae: object | None) -> _BundleSize:
+    model_size = _runtime_size(model)
+    clip_size = _runtime_size(clip)
+    vae_size = _runtime_size(vae)
+    unknown_targets = tuple(
+        name
+        for name, size in (
+            ("model", model_size),
+            ("clip", clip_size),
+            ("vae", vae_size),
+        )
+        if not size.known
+    )
+    return _BundleSize(
+        model_size.bytes,
+        clip_size.bytes,
+        vae_size.bytes,
+        model_size.bytes + clip_size.bytes + vae_size.bytes,
+        unknown_targets,
+    )
+
+
+def _force_single_unknown_targets(unknown_targets: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(target for target in unknown_targets if target == "model")
 
 
 def _total_vram_bytes_or_zero() -> int:
@@ -185,30 +283,85 @@ def _load_from_last_cache(cache_key: str) -> tuple[object, object | None, object
         return value[0], value[1], value[2]
 
 
-def _store_last_cache(cache_key: str, model: object, clip: object | None, vae: object | None) -> None:
-    _, _, _, bundle_bytes = _bundle_size_bytes(model, clip, vae)
+def _store_last_cache(cache_key: str, model: object, clip: object | None, vae: object | None) -> _StoreCacheResult:
+    bundle_size = _bundle_size_bytes(model, clip, vae)
+    settings = get_use_loaded_model_cache_settings()
+    max_entries = max(1, min(9, int(settings.max_cache_entries)))
+    retention = settings.cache_retention
     total_vram_bytes = _total_vram_bytes_or_zero()
-    budget_two_bytes = int(total_vram_bytes * _CACHE_TWO_ENTRY_BUDGET_RATIO)
+    budget_bytes = int(total_vram_bytes * settings.memory_budget_ratio) if total_vram_bytes > 0 else 0
+    recent_total_bytes = 0
+    reason = "fixed_count"
 
+    evicted_entries: list[tuple[str, int]] = []
     with _CACHE_LOCK:
         _LAST_CACHE[cache_key] = (model, clip, vae)
-        _LAST_CACHE_BYTES[cache_key] = bundle_bytes
+        _LAST_CACHE_BYTES[cache_key] = bundle_size.total_bytes
+        _LAST_CACHE_UNKNOWN[cache_key] = bundle_size.unknown_targets
         _LAST_CACHE.move_to_end(cache_key)
         _LAST_CACHE_BYTES.move_to_end(cache_key)
+        _LAST_CACHE_UNKNOWN.move_to_end(cache_key)
 
-        recent_keys = list(_LAST_CACHE.keys())[-_LAST_CACHE_LIMIT:]
+        recent_keys = list(_LAST_CACHE.keys())[-max_entries:]
         recent_total_bytes = sum(_LAST_CACHE_BYTES.get(key, 0) for key in recent_keys)
+        recent_force_unknown = any(
+            _force_single_unknown_targets(_LAST_CACHE_UNKNOWN.get(key, ()))
+            for key in recent_keys
+        )
+        force_unknown_targets = _force_single_unknown_targets(bundle_size.unknown_targets)
 
-        if total_vram_bytes <= 0:
+        if force_unknown_targets or recent_force_unknown:
             target_limit = 1
-        elif recent_total_bytes <= budget_two_bytes:
-            target_limit = 2
+            reason = "size_unknown"
+        elif retention == CACHE_RETENTION_FIXED:
+            target_limit = max_entries
+            reason = "fixed_count"
         else:
-            target_limit = 1
+            if total_vram_bytes <= 0:
+                target_limit = 1
+                reason = "memory_unavailable"
+            else:
+                target_limit = _auto_cache_limit(recent_keys, budget_bytes)
+                reason = "budget" if target_limit < max_entries else "budget_ok"
 
         while len(_LAST_CACHE) > target_limit:
+            old_key_size = _LAST_CACHE_BYTES.get(next(iter(_LAST_CACHE)), 0)
             old_key, _ = _LAST_CACHE.popitem(last=False)
             _LAST_CACHE_BYTES.pop(old_key, None)
+            _LAST_CACHE_UNKNOWN.pop(old_key, None)
+            evicted_entries.append((old_key, old_key_size))
+
+        final_total_bytes = sum(_LAST_CACHE_BYTES.values())
+
+        return _StoreCacheResult(
+            bundle_size=bundle_size,
+            retention=retention,
+            max_entries=max_entries,
+            target_limit=target_limit,
+            total_memory_bytes=total_vram_bytes,
+            budget_bytes=budget_bytes,
+            budget_ratio=settings.memory_budget_ratio,
+            recent_total_bytes=recent_total_bytes,
+            final_total_bytes=final_total_bytes,
+            entries=len(_LAST_CACHE),
+            evicted_entries=tuple(evicted_entries),
+            reason=reason,
+        )
+
+
+def _auto_cache_limit(recent_keys: list[str], budget_bytes: int) -> int:
+    if not recent_keys:
+        return 1
+
+    target_limit = 1
+    running_total = 0
+    for count, key in enumerate(reversed(recent_keys), start=1):
+        next_total = running_total + _LAST_CACHE_BYTES.get(key, 0)
+        if count > 1 and next_total > budget_bytes:
+            break
+        running_total = next_total
+        target_limit = count
+    return max(1, target_limit)
 
 
 def _load_from_cache(
@@ -227,8 +380,74 @@ def _store_cache(
     clip: object | None,
     vae: object | None,
 ) -> bool:
-    _store_last_cache(cache_key, model, clip, vae)
+    result = _store_last_cache(cache_key, model, clip, vae)
+    _log_store_result(cache_key, result)
     return True
+
+
+def _log_store_result(cache_key: str, result: _StoreCacheResult) -> None:
+    size = result.bundle_size
+    budget_ratio_text = _format_ratio_percent(result.budget_ratio)
+    budget_text = (
+        f"{_format_bytes(result.budget_bytes)} ({budget_ratio_text})"
+        if result.retention != CACHE_RETENTION_FIXED and result.budget_bytes > 0
+        else f"n/a ({budget_ratio_text})"
+    )
+    total_memory_text = _format_bytes(result.total_memory_bytes) if result.total_memory_bytes > 0 else "n/a"
+    size_percent = _format_percent(size.total_bytes, result.total_memory_bytes)
+    final_total_percent = _format_percent(result.final_total_bytes, result.total_memory_bytes)
+    _cache_log(
+        (
+            f"store key={_cache_key_label(cache_key)} size={_format_bytes(size.total_bytes)} ({size_percent}) "
+            f"cache_total={_format_bytes(result.final_total_bytes)} ({final_total_percent}) "
+            f"entries={result.entries} limit={result.target_limit} max_entries={result.max_entries} "
+            f"retention={result.retention} reason={result.reason} budget={budget_text} total_memory={total_memory_text}"
+        )
+    )
+
+    force_unknown_targets = _force_single_unknown_targets(size.unknown_targets)
+    non_forcing_unknown_targets = tuple(
+        target for target in size.unknown_targets if target not in force_unknown_targets
+    )
+    if force_unknown_targets:
+        _cache_log(
+            (
+                f"size_unknown key={_cache_key_label(cache_key)} targets={','.join(force_unknown_targets)} "
+                "action=force_single_entry"
+            )
+        )
+    elif result.reason == "size_unknown" and result.target_limit == 1 and result.max_entries > 1:
+        _cache_log(
+            (
+                f"force_single_entry key={_cache_key_label(cache_key)} reason=size_unknown "
+                f"source=recent_cache max_entries={result.max_entries} retention={result.retention}"
+            )
+        )
+    if non_forcing_unknown_targets:
+        _cache_log(
+            (
+                f"size_unknown key={_cache_key_label(cache_key)} targets={','.join(non_forcing_unknown_targets)} "
+                "action=ignored_for_entry_limit"
+            )
+        )
+
+    if result.target_limit == 1 and result.max_entries > 1 and result.reason != "size_unknown":
+        _cache_log(
+            (
+                f"force_single_entry key={_cache_key_label(cache_key)} reason={result.reason} "
+                f"max_entries={result.max_entries} retention={result.retention}"
+            )
+        )
+
+    for evicted_key, evicted_bytes in result.evicted_entries:
+        _cache_log(
+            (
+                f"evict key={_cache_key_label(evicted_key)} freed={_format_bytes(evicted_bytes)} "
+                f"cache_total={_format_bytes(result.final_total_bytes)} ({final_total_percent}) "
+                f"reason={result.reason} entries={result.entries} limit={result.target_limit} "
+                f"budget={budget_text} total_memory={total_memory_text}"
+            )
+        )
 
 
 def _apply_lora_stack_with_project_node(
@@ -403,13 +622,29 @@ class UseLoadedModel(c_io.ComfyNode):
 
         cached = _load_from_cache(cache_key)
         if cached is not None:
+            _cache_log(
+                (
+                    f"hit key={_cache_key_label(cache_key)} source={cached[1]} "
+                    f"model={_model_label(model)} entries={len(_LAST_CACHE)}"
+                )
+            )
             return c_io.NodeOutput(cached[0][0], cached[0][1], cached[0][2])
+
+        required_inputs = ["loaded_model"]
+        if _requires_clip_runtime(model, clip):
+            required_inputs.append("loaded_clip")
+        required_inputs.append("loaded_vae")
+        _cache_log(
+            (
+                f"miss key={_cache_key_label(cache_key)} model={_model_label(model)} "
+                f"required={','.join(required_inputs)} entries={len(_LAST_CACHE)}"
+            )
+        )
 
         if loaded_model is _MISSING or loaded_model is None:
             raise RuntimeError("loaded_model input is required on cache miss")
 
-        requires_clip_runtime = _requires_clip_runtime(model, clip)
-        if requires_clip_runtime and (loaded_clip is _MISSING or loaded_clip is None):
+        if "loaded_clip" in required_inputs and (loaded_clip is _MISSING or loaded_clip is None):
             raise RuntimeError("loaded_clip input is required on cache miss")
 
         normalized_lora_stack = _to_lora_stack_payload(lora_stack_items)

@@ -61,6 +61,12 @@ def _append_error(result: dict[str, Any], name: str, exc: BaseException) -> None
     )
 
 
+def release_memory_summary_text(result: dict[str, Any]) -> str:
+    step_count = len(result.get("steps", ()))
+    error_count = len(result.get("errors", ()))
+    return f"steps={step_count} errors={error_count}"
+
+
 def _clear_use_loaded_model_cache(result: dict[str, Any]) -> None:
     from ..nodes import use_loaded_model
 
@@ -68,8 +74,12 @@ def _clear_use_loaded_model_cache(result: dict[str, Any]) -> None:
         entry_count = len(use_loaded_model._LAST_CACHE)
         use_loaded_model._LAST_CACHE.clear()
         use_loaded_model._LAST_CACHE_BYTES.clear()
+        use_loaded_model._LAST_CACHE_UNKNOWN.clear()
 
     _append_step(result, "use_loaded_model_cache", cleared_entries=entry_count)
+    log_cache = getattr(use_loaded_model, "_cache_log", None)
+    if callable(log_cache):
+        log_cache(f"clear reason=release_memory cleared_entries={entry_count}")
 
 
 def _clear_load_new_model_vae_cache(result: dict[str, Any]) -> None:
