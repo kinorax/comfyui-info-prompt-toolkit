@@ -1,6 +1,6 @@
 [project]
 name = "info-prompt-toolkit"
-version = "1.4.0"
+version = "1.4.1"
 description = "Civitai-compatible metadata saving, same-name .txt captions, XY Plot, Tiled Sampling, Detailer, PixAI Tagger, OppaiOracle Tagger, wildcards, Dynamic Prompts, re-encoding-free referenced image saving, and A1111 infotext/image_info reuse to simplify ComfyUI wiring, improve reusability, and carry trial results into the next production pass."
 readme = "README.md"
 license = { file = "LICENSE" }
