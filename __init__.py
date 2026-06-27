@@ -7,6 +7,7 @@ from .nodes.image_info_context import ImageInfoContext
 from .nodes.image_info_defaults import ImageInfoDefaults
 from .nodes.image_info_fallback import ImageInfoFallback
 from .nodes.any_switch_any import AnySwitchAny
+from .nodes.has_value_any import HasValueAny
 from .nodes.debug.console_log_relay import ConsoleLogRelay
 from .nodes.debug.image_batch_count_debug import ImageBatchCountDebug
 from .nodes.debug.image_info_count_debug import ImageInfoCountDebug
@@ -14,13 +15,16 @@ from .nodes.debug.latent_batch_count_debug import LatentBatchCountDebug
 from .nodes.sampler_selector import SamplerSelector
 from .nodes.scheduler_selector import SchedulerSelector
 from .nodes.sampler_params import SamplerParams
+from .nodes.sampler_params_context import SamplerParamsContext
 from .nodes.split_sampler_params import SplitSamplerParams
 from .nodes.sampler_custom_from_params import SamplerCustomFromParams
 from .nodes.sampler_custom_from_params_tiled import SamplerCustomFromParamsTiled
 from .nodes.lora_selector import LoraSelector
 from .nodes.checkpoint_selector import CheckpointSelector
+from .nodes.model_merge import ModelMerge
 from .nodes.use_loaded_model import UseLoadedModel
 from .nodes.load_new_model import LoadNewModel
+from .nodes.model_save_with_net_prefix import ModelSaveWithNetPrefix
 from .nodes.vae_selector import VaeSelector
 from .nodes.clip_selector import ClipSelector
 from .nodes.dual_clip_selector import DualClipSelector
@@ -31,15 +35,18 @@ from .nodes.diffusion_model_selector import DiffusionModelSelector
 # from .nodes.model_sampling_auraflow import ModelSamplingAuraFlow
 from .nodes.image_reader import ImageReader
 from .nodes.image_list_to_batch import ImageListToBatch
+from .nodes.trim_image_by_margin import TrimImageByMargin
 from .nodes.video_reader import VideoReader
 from .nodes.batch_image_reader import ImageDirectoryReader
 from .nodes.caption_file_saver import CaptionFileSaver
 from .nodes.image_saver import ImageSaver
+from .nodes.referenced_image_saver import ReferencedImageSaver
 from .nodes.video_saver import VideoSaver
 from .nodes.image_info_to_infotext import ImageInfoToInfotext
 from .nodes.infotext_to_image_info import InfotextToImageInfo
 from .nodes.prompt_to_lora_stack import PromptToLoraStack
 from .nodes.combine_lora_stacks import CombineLoraStacks
+from .nodes.combine_extras import CombineExtras
 from .nodes.lora_stack_lorader import LoraStackLorader
 from .nodes.prompt.combine_prompts import CombinePrompts
 from .nodes.prompt.merge_caption_tokens import MergeCaptionTokens
@@ -56,7 +63,9 @@ from .nodes.set_sampler_params_extra import SetSamplerParamsExtra
 from .nodes.set_int_extra import SetIntExtra
 from .nodes.set_float_extra import SetFloatExtra
 from .nodes.set_size_extra import SetSizeExtra
+from .nodes.set_margin_extra import SetMarginExtra
 from .nodes.aspect_ratio_to_size import AspectRatioToSize
+from .nodes.aspect_ratio_to_size_trim_margin import AspectRatioToSizeTrimMargin
 from .nodes.scale_width_height import ScaleWidthHeight
 from .nodes.remove_image_info_extra_key import RemoveImageInfoExtraKeys
 from .nodes.remove_image_info_main_field import RemoveImageInfoMainFields
@@ -67,6 +76,7 @@ from .nodes.get_sampler_params_extra import GetSamplerParamsExtra
 from .nodes.get_int_extra import GetIntExtra
 from .nodes.get_float_extra import GetFloatExtra
 from .nodes.get_size_extra import GetSizeExtra
+from .nodes.get_margin_extra import GetMarginExtra
 from .nodes.split_width_height import SplitWidthHeight
 from .nodes.seed_generator import SeedGenerator
 from .nodes.mask.mask_overlay_comparer import MaskOverlayComparer
@@ -104,6 +114,7 @@ class _Extension(ComfyExtension):
             ImageInfoDefaults,
             ImageInfoFallback,
             AnySwitchAny,
+            HasValueAny,
             ConsoleLogRelay,
             ImageBatchCountDebug,
             ImageInfoCountDebug,
@@ -111,13 +122,16 @@ class _Extension(ComfyExtension):
             SamplerSelector,
             SchedulerSelector,
             SamplerParams,
+            SamplerParamsContext,
             SplitSamplerParams,
             SamplerCustomFromParams,
             SamplerCustomFromParamsTiled,
             LoraSelector,
             CheckpointSelector,
+            ModelMerge,
             LoadNewModel,
             UseLoadedModel,
+            ModelSaveWithNetPrefix,
             VaeSelector,
             ClipSelector,
             DualClipSelector,
@@ -128,15 +142,18 @@ class _Extension(ComfyExtension):
             # ModelSamplingAuraFlow,
             ImageReader,
             ImageListToBatch,
+            TrimImageByMargin,
             VideoReader,
             ImageDirectoryReader,
             CaptionFileSaver,
             ImageSaver,
+            ReferencedImageSaver,
             VideoSaver,
             ImageInfoToInfotext,
             InfotextToImageInfo,
             PromptToLoraStack,
             CombineLoraStacks,
+            CombineExtras,
             LoraStackLorader,
             CombinePrompts,
             MergeCaptionTokens,
@@ -154,7 +171,9 @@ class _Extension(ComfyExtension):
             SetIntExtra,
             SetFloatExtra,
             SetSizeExtra,
+            SetMarginExtra,
             AspectRatioToSize,
+            AspectRatioToSizeTrimMargin,
             ScaleWidthHeight,
             RemoveImageInfoExtraKeys,
             RemoveImageInfoMainFields,
@@ -165,6 +184,7 @@ class _Extension(ComfyExtension):
             GetIntExtra,
             GetFloatExtra,
             GetSizeExtra,
+            GetMarginExtra,
             SplitWidthHeight,
             SeedGenerator,
             MaskOverlayComparer,

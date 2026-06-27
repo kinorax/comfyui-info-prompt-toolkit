@@ -74,7 +74,7 @@ pip install -r requirements.txt
   <li><code>Image Info Fallback</code> は、優先側 <code>image_info</code> の未設定項目を <code>image_info_fallback</code> から補完します。</li>
   <li>補完は欠損項目に限定され、優先側に値がある項目は上書きしません。</li>
   <li><code>extras</code> は未存在キーのみを追加する形でマージされ、既存キーは保持されます。</li>
-  <li>優先側 <code>positive</code> が存在する場合、<code>lora_stack</code> は fallback 側から補完しません。</li>
+  <li><code>lora_stack</code> は未存在または <code>None</code> の場合に補完され、明示的な空 list は「LoRA なし」として保持されます。</li>
 </ul>
 <br clear="left">
 
@@ -165,6 +165,17 @@ pip install -r requirements.txt
 </ul>
 <br clear="left">
 
+### Referenced Image Saver
+
+<a href="assets/readme/referenced-image-saver.webp"><img align="left" hspace="16" src="assets/readme/referenced-image-saver.webp" alt="Referenced Image Saver" width="210"></a>
+<ul>
+  <li><code>Referenced Image Saver</code>は、<code>image_reference</code>で渡された既存画像ファイルをComfyUIのoutputディレクトリへコピーし、画像ピクセルを再エンコードせずに、<code>image_info</code>からA1111 infotextメタデータを書き換えます。</li>
+  <li>PNG / WebP / JPEGのメタデータ書き換えに対応し、参照元の拡張子を維持するため、非可逆圧縮のWebPやJPEGを追加の画質劣化なしで保存し直す用途に適しています。</li>
+  <li><code>file_stem</code>が未接続の場合は<code>Image Saver</code>と同じ自動連番を使います。接続した場合は<code>&lt;file_stem&gt;&lt;参照元の拡張子&gt;</code>で保存し、同名の既存ファイルを上書きします。</li>
+  <li><code>output_subdir</code>で日付別のサブディレクトリへ整理でき、<code>write_caption</code>を有効にすると画像と同名の<code>.txt</code>キャプションも保存します。</li>
+</ul>
+<br clear="left">
+
 ### Image Directory Reader
 
 <a href="assets/readme/image-directory-reader.webp"><img align="left" hspace="16" src="assets/readme/image-directory-reader.webp" alt="Image Directory Reader" width="210"></a>
@@ -212,6 +223,17 @@ pip install -r requirements.txt
 </ul>
 <br clear="left">
 
+### Aspect Ratio to Size (Trim Margin) / Trim Image by Margin
+
+<a href="assets/readme/trim-margin-nodes.webp"><img align="left" hspace="16" src="assets/readme/trim-margin-nodes.webp" alt="Aspect Ratio to Size (Trim Margin) and Trim Image by Margin" width="210"></a>
+<ul>
+  <li><code>Aspect Ratio to Size (Trim Margin)</code>は、必要な画像領域より外側まで含むサンプリングサイズを算出し、生成後に<code>Trim Image by Margin</code>で余白を取り除けるようにします。左右・上下のmarginは各ペアで連動し、合計が0または<code>min_unit</code>になります。各サイズ出力は4辺のmarginを含み、<code>min_unit</code>で割り切れる値になります。</li>
+  <li>トリム後に残すサイズは<code>actual_width</code> / <code>actual_height</code>で編集します。readonlyの<code>width</code> / <code>height</code>にはmargin込みサンプリングサイズが表示され、<code>actual_ratio</code>はトリム後サイズの比率を示します。</li>
+  <li><code>margin</code>出力は<code>top</code>、<code>right</code>、<code>bottom</code>、<code>left</code>を束ね、<code>Trim Image by Margin</code>へ渡せます。<code>margin</code>が未接続の場合、Trimノードは画像をそのまま返します。</li>
+  <li><code>Set Margin Extra</code> / <code>Get Margin Extra</code>を使うと、marginを画像情報のextrasへ保存し、4辺の値とmargin型へ復元できます。</li>
+</ul>
+<br clear="left">
+
 ### Load New Model / Use Loaded Model
 
 <a href="assets/readme/load-new-model-and-use-loaded-model.webp"><img align="left" hspace="16" src="assets/readme/load-new-model-and-use-loaded-model.webp" alt="Load New Model and Use Loaded Model" width="210"></a>
@@ -224,6 +246,21 @@ pip install -r requirements.txt
   <li>キャッシュ挙動は <code>ComfyUI Settings &gt; Info-Prompt-Toolkit &gt; Use Loaded Model キャッシュ</code> で設定できます。<code>自動</code> は最新1件を必ず保持し、古いキャッシュを推定メモリサイズと <code>メモリ予算比率</code> に基づいて削除します。<code>固定</code> はメモリ予算を見ず、<code>最大キャッシュ数</code> まで保持します。<code>最大キャッシュ数</code> の既定値は <code>1</code> で、<code>1</code> から <code>9</code> まで設定できます。</li>
   <li><code>キャッシュログを出力</code> を有効にすると、cache hit / miss / store / evict / clear が ComfyUI の Python コンソールに出力されます。store / evict では推定メモリ量も確認できます。</li>
   <li><code>lora_stack</code> は要素の順序と強度も条件に含まれるため、並び順や値が変わると別条件として扱われます。</li>
+</ul>
+<br clear="left">
+
+### Model Merge
+
+<a href="assets/readme/model-merge.webp"><img align="left" hspace="16" src="assets/readme/model-merge.webp" alt="Model Merge" width="210"></a>
+<ul>
+  <li><code>Model Merge</code>は、2つの<code>IPT-Model</code>選択値とマージ比率を、新しい<code>IPT-Model</code>値へ記録するノードです。この時点ではモデルweightの読み込みやマージは行わず、出力を<code>Load New Model</code>へ渡したときに実際のモデルruntimeを読み込んでマージします。</li>
+  <li>出力を<code>Image Info Context</code>等の<code>model</code>、<code>refiner</code>、または<code>detailer</code>入力へ接続すると、マージ元となる両方のモデル参照、モデル種別、model / CLIP比率を含む完全なマージ構成を<code>image_info</code>へ保持できます。</li>
+  <li>その<code>image_info</code>を<code>Image Saver</code>等で保存すると、マージ構成はJSONへ変換され、A1111 infotext形式のメタデータに含まれます。格納先の<code>image_info</code>フィールドに応じて、単一モデルの通常項目へ平坦化されず、<code>Model Merge</code>、<code>Refiner Merge</code>、または<code>Detailer Merge</code>として記録されます。</li>
+  <li>保存画像を<code>Image Reader</code>で読み込むと、マージ情報が解析され、<code>image_info</code>内の対応する<code>model</code>、<code>refiner</code>、または<code>detailer</code>値へマージ構成が復元されます。その後、<code>Image Info Context</code>から復元済みの<code>IPT-Model</code>値を出力し、<code>Load New Model</code>で再利用できます。</li>
+  <li>メタデータに保存されるのはマージ構成であり、マージ済みモデルのweight本体ではありません。同じ構成を読み込んで再実行するには、参照元のモデルファイルがローカル環境に存在する必要があります。</li>
+  <li><code>base_model</code>と<code>merge_model</code>は、両方ともcheckpoint、または両方ともdiffusion modelである必要があり、異なるモデル種別を混在させることはできません。</li>
+  <li><code>model_ratio</code>は、<code>0.0</code>の基準モデル側から<code>1.0</code>の2つ目のモデル側まで、モデルのマージ比率を調整します。checkpointでは、<code>clip_ratio</code>でCLIPのマージ比率を同じ範囲で個別に調整できます。</li>
+  <li>checkpointのマージでは<code>base_model</code>のVAEを維持します。diffusion modelでは<code>clip_ratio</code>は使用されず、必要なCLIP / VAEは<code>Load New Model</code>へ別途渡せます。</li>
 </ul>
 <br clear="left">
 

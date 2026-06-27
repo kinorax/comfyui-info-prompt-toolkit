@@ -2,6 +2,7 @@
 import hashlib
 import os
 import re
+from pathlib import Path
 from typing import Optional
 
 import folder_paths
@@ -15,6 +16,7 @@ from .. import const as Const
 from ..utils import cast as Cast
 from ..utils import clipspace_bridge as ClipspaceBridge
 from ..utils import exif as Exif
+from ..utils.image_file_reference import build_image_file_ref, read_caption_text, resolve_caption_path
 from ..utils.a1111_infotext import a1111_infotext_to_image_info
 from ..utils.image_reader_metadata import read_a1111_text_from_image_selection
 from ..utils.image_info_normalizer import normalize_image_info_with_comfy_options
@@ -102,6 +104,12 @@ class ImageReader(c_io.ComfyNode):
                 c_io.Mask.Output(Cast.out_id("mask"), display_name="mask"),
                 Const.IMAGEINFO_TYPE.Output(Cast.out_id(Const.IMAGEINFO), display_name=Const.IMAGEINFO),
                 c_io.String.Output("INFO", display_name="infotext(raw)"),
+                c_io.String.Output(Cast.out_id("file_stem"), display_name="file_stem"),
+                c_io.String.Output(Cast.out_id("caption"), display_name="caption"),
+                Const.IMAGE_FILE_REF_TYPE.Output(
+                    Cast.out_id("image_reference"),
+                    display_name="image_reference",
+                ),
             ],
         )
 
@@ -109,6 +117,16 @@ class ImageReader(c_io.ComfyNode):
     def execute(cls, image: str) -> c_io.NodeOutput:
         image_path, a1111_text = read_a1111_text_from_image_selection(image)
         img = node_helpers.pillow(Image.open, image_path)
+        source_path = Path(image_path)
+        file_stem = source_path.stem
+        try:
+            caption = read_caption_text(source_path)
+        except Exception as exc:
+            raise RuntimeError(f"failed to read caption: {resolve_caption_path(source_path).name}") from exc
+        image_reference = build_image_file_ref(
+            source_path,
+            format_name=str(getattr(img, "format", "") or ""),
+        )
         image_info = a1111_infotext_to_image_info(a1111_text)
         image_info = normalize_image_info_with_comfy_options(image_info)
 
@@ -158,7 +176,7 @@ class ImageReader(c_io.ComfyNode):
             out_image = output_images[0]
             out_mask = output_masks[0]
 
-        return c_io.NodeOutput(out_image, out_mask, image_info, a1111_text)
+        return c_io.NodeOutput(out_image, out_mask, image_info, a1111_text, file_stem, caption, image_reference)
 
     @classmethod
     def fingerprint_inputs(cls, image: str):
@@ -167,6 +185,14 @@ class ImageReader(c_io.ComfyNode):
         m = hashlib.sha256()
         with open(image_path, "rb") as f:
             m.update(f.read())
+        caption_path = resolve_caption_path(image_path)
+        if caption_path.is_file():
+            stat = caption_path.stat()
+            m.update(caption_path.name.encode("utf-8"))
+            m.update(str(stat.st_size).encode("utf-8"))
+            m.update(str(stat.st_mtime_ns).encode("utf-8"))
+        else:
+            m.update(b"caption:none")
         return m.digest().hex()
 
     @classmethod

@@ -76,7 +76,7 @@ The workflow files use English labels throughout.
   <li><code>Image Info Fallback</code> fills missing fields in the primary <code>image_info</code> from <code>image_info_fallback</code>.</li>
   <li>Fallback is limited to missing fields, and fields that already have values in the primary side are not overwritten.</li>
   <li><code>extras</code> is merged by adding only missing keys, while existing keys are preserved.</li>
-  <li>When primary <code>positive</code> is present, <code>lora_stack</code> is not supplemented from the fallback side.</li>
+  <li><code>lora_stack</code> is supplemented when it is missing or <code>None</code>; an explicit empty list means no LoRA and is preserved.</li>
 </ul>
 <br clear="left">
 
@@ -167,6 +167,17 @@ The workflow files use English labels throughout.
 </ul>
 <br clear="left">
 
+### Referenced Image Saver
+
+<a href="assets/readme/referenced-image-saver.webp"><img align="left" hspace="16" src="assets/readme/referenced-image-saver.webp" alt="Referenced Image Saver" width="210"></a>
+<ul>
+  <li><code>Referenced Image Saver</code> copies an existing file supplied through <code>image_reference</code> into the ComfyUI output directory and rewrites its A1111 infotext metadata from <code>image_info</code> without re-encoding the image pixels.</li>
+  <li>It supports PNG / WebP / JPEG metadata updates and preserves the source extension, making it useful for saving lossy WebP or JPEG images again without further quality loss.</li>
+  <li>When <code>file_stem</code> is unconnected, it uses the same automatic serial naming as <code>Image Saver</code>. When connected, it saves as <code>&lt;file_stem&gt;&lt;source extension&gt;</code> and overwrites an existing file with the same name.</li>
+  <li><code>output_subdir</code> can organize files by date, and enabling <code>write_caption</code> writes a same-name <code>.txt</code> caption alongside each image.</li>
+</ul>
+<br clear="left">
+
 ### Image Directory Reader
 
 <a href="assets/readme/image-directory-reader.webp"><img align="left" hspace="16" src="assets/readme/image-directory-reader.webp" alt="Image Directory Reader" width="210"></a>
@@ -214,6 +225,17 @@ The workflow files use English labels throughout.
 </ul>
 <br clear="left">
 
+### Aspect Ratio to Size (Trim Margin) / Trim Image by Margin
+
+<a href="assets/readme/trim-margin-nodes.webp"><img align="left" hspace="16" src="assets/readme/trim-margin-nodes.webp" alt="Aspect Ratio to Size (Trim Margin) and Trim Image by Margin" width="210"></a>
+<ul>
+  <li><code>Aspect Ratio to Size (Trim Margin)</code> calculates a sampling size that extends beyond the desired image edges so that <code>Trim Image by Margin</code> can remove the margins afterward. The horizontal and vertical margin pairs stay linked, with each pair totaling either zero or <code>min_unit</code>. Its size outputs include all four margins and remain divisible by <code>min_unit</code>.</li>
+  <li>Edit <code>actual_width</code> / <code>actual_height</code> as the size remaining after trimming. The readonly <code>width</code> / <code>height</code> fields show the sampling size including margins, while <code>actual_ratio</code> describes the trimmed size.</li>
+  <li>The <code>margin</code> output bundles <code>top</code>, <code>right</code>, <code>bottom</code>, and <code>left</code> for <code>Trim Image by Margin</code>. When <code>margin</code> is unconnected, the trim node passes the image through unchanged.</li>
+  <li><code>Set Margin Extra</code> / <code>Get Margin Extra</code> store margins in image-info extras and restore both the bundled margin and its four edge values.</li>
+</ul>
+<br clear="left">
+
 ### Load New Model / Use Loaded Model
 
 <a href="assets/readme/load-new-model-and-use-loaded-model.webp"><img align="left" hspace="16" src="assets/readme/load-new-model-and-use-loaded-model.webp" alt="Load New Model and Use Loaded Model" width="210"></a>
@@ -226,6 +248,21 @@ The workflow files use English labels throughout.
   <li>Cache behavior is configurable in <code>ComfyUI Settings &gt; Info-Prompt-Toolkit &gt; Use Loaded Model Cache</code>. <code>Auto</code> always keeps the latest entry and prunes older entries by estimated memory size and <code>Memory budget ratio</code>; <code>Fixed</code> keeps up to <code>Max cache entries</code> regardless of the memory budget. <code>Max cache entries</code> defaults to <code>1</code> and can be set from <code>1</code> to <code>9</code>.</li>
   <li><code>Use cache logging</code> prints cache hit / miss / store / evict / clear messages to the ComfyUI Python console, including estimated memory amounts for store and evict events.</li>
   <li><code>lora_stack</code> matching is order- and strength-sensitive, so changing order or values is treated as a different condition set.</li>
+</ul>
+<br clear="left">
+
+### Model Merge
+
+<a href="assets/readme/model-merge.webp"><img align="left" hspace="16" src="assets/readme/model-merge.webp" alt="Model Merge" width="210"></a>
+<ul>
+  <li><code>Model Merge</code> records two <code>IPT-Model</code> selections and their merge ratios in a new <code>IPT-Model</code> value. It does not load or merge model weights immediately; the actual model runtimes are loaded and merged when the result is passed to <code>Load New Model</code>.</li>
+  <li>Connect the result to the corresponding <code>model</code>, <code>refiner</code>, or <code>detailer</code> input of <code>Image Info Context</code> or another image-info node to retain the complete merge configuration in <code>image_info</code>, including both source model references, their model types, and the model / CLIP ratios.</li>
+  <li>When that <code>image_info</code> is saved by <code>Image Saver</code> or another compatible saver, the configuration is serialized as JSON in the A1111 infotext metadata. Depending on its <code>image_info</code> field, it is written as <code>Model Merge</code>, <code>Refiner Merge</code>, or <code>Detailer Merge</code> instead of being flattened into an ordinary single-model entry.</li>
+  <li>When the saved image is loaded by <code>Image Reader</code>, the merge metadata is parsed back into the corresponding <code>model</code>, <code>refiner</code>, or <code>detailer</code> value in <code>image_info</code>. <code>Image Info Context</code> can then output the restored <code>IPT-Model</code> value for reuse with <code>Load New Model</code>.</li>
+  <li>The metadata stores the merge configuration, not the merged model weights. The referenced source model files must therefore be available locally when the configuration is loaded and executed again.</li>
+  <li><code>base_model</code> and <code>merge_model</code> must both be checkpoints or both be diffusion models; mixing the two model types is not supported.</li>
+  <li><code>model_ratio</code> controls the model merge from the base model at <code>0.0</code> to the second model at <code>1.0</code>. For checkpoints, <code>clip_ratio</code> independently controls the CLIP merge over the same range.</li>
+  <li>Checkpoint merges retain the VAE from <code>base_model</code>. For diffusion models, <code>clip_ratio</code> is ignored and CLIP / VAE can be supplied to <code>Load New Model</code> as needed.</li>
 </ul>
 <br clear="left">
 

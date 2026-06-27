@@ -140,10 +140,11 @@ def a1111_infotext_to_image_info(infotext: str | None) -> dict[str, Any]:
         output[IMAGEINFO_POSITIVE] = positive
         # Keep negative as empty string when positive exists but marker is absent.
         output[IMAGEINFO_NEGATIVE] = negative
+        output[IMAGEINFO_LORA_STACK] = lora_stack
     elif negative:
         output[IMAGEINFO_NEGATIVE] = negative
 
-    if lora_stack:
+    if lora_stack and IMAGEINFO_LORA_STACK not in output:
         output[IMAGEINFO_LORA_STACK] = lora_stack
 
     extras: dict[str, str] = {}

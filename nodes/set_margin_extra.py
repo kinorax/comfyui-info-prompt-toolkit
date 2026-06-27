@@ -5,20 +5,20 @@ from comfy_api.latest import io as c_io
 
 from .. import const as Const
 from ..utils import cast as Cast
-from ..utils.lora_stack_extra import is_reserved_extra_key, merge_extra_value, normalized_extra_key_or_none
-from ..utils.sampler_params import (
-    SAMPLER_PARAMS_KEY,
-    sampler_params_payload_or_error,
-    serialize_sampler_params_extra_json,
+from ..utils.margin import (
+    margin_payload_or_error,
+    merge_extra_value,
+    normalized_extra_key_or_none,
+    serialize_margin_extra_json,
 )
 
 
-class SetSamplerParamsExtra(c_io.ComfyNode):
+class SetMarginExtra(c_io.ComfyNode):
     @classmethod
     def define_schema(cls) -> c_io.Schema:
         return c_io.Schema(
-            node_id="IPT-SetSamplerParamsExtra",
-            display_name="Set Sampler Params Extra",
+            node_id="IPT-SetMarginExtra",
+            display_name="Set Margin Extra",
             category=Const.CATEGORY_IMAGEINFO,
             inputs=[
                 Const.IMAGEINFO_EXTRAS_TYPE.Input(
@@ -29,9 +29,9 @@ class SetSamplerParamsExtra(c_io.ComfyNode):
                     "key",
                     tooltip="Parameter line key",
                 ),
-                Const.SAMPLER_PARAMS_TYPE.Input(
-                    SAMPLER_PARAMS_KEY,
-                    display_name=SAMPLER_PARAMS_KEY,
+                Const.MARGIN_TYPE.Input(
+                    "margin",
+                    display_name="margin",
                     optional=True,
                     extra_dict={"forceInput": True},
                 ),
@@ -47,36 +47,31 @@ class SetSamplerParamsExtra(c_io.ComfyNode):
     @classmethod
     def validate_inputs(
         cls,
-        key: object = None,
-        sampler_params: object | None = None,
+        key: object,
+        margin: object | None = None,
         extras: dict[str, object] | None = None,
     ) -> bool | str:
         normalized_key = normalized_extra_key_or_none(key)
         if key is not None and normalized_key is None:
             return "key is required"
-        if normalized_key is not None and is_reserved_extra_key(normalized_key):
-            return f"key '{normalized_key}' is reserved and cannot be used"
-        if sampler_params is not None:
-            _, error = sampler_params_payload_or_error(sampler_params, require_all=False)
-            if error is not None:
-                return error
-        return True
+
+        # Linked custom values are unresolved during Comfy validation.
+        if margin is None:
+            return True
+        _payload, error = margin_payload_or_error(margin)
+        return error or True
 
     @classmethod
     def execute(
         cls,
-        key: object = None,
-        sampler_params: object | None = None,
+        key: object,
+        margin: object | None = None,
         extras: dict[str, object] | None = None,
     ) -> c_io.NodeOutput:
         normalized_key = normalized_extra_key_or_none(key)
         if normalized_key is None:
-            raise RuntimeError("Set Sampler Params Extra: key is required")
-        if is_reserved_extra_key(normalized_key):
-            raise RuntimeError(
-                f"Set Sampler Params Extra: key '{normalized_key}' is reserved and cannot be used"
-            )
+            raise RuntimeError("Set Margin Extra: key is required")
 
-        serialized = serialize_sampler_params_extra_json(sampler_params)
+        serialized = serialize_margin_extra_json(margin)
         output = merge_extra_value(extras, normalized_key, serialized)
         return c_io.NodeOutput(output)

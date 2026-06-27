@@ -23,6 +23,7 @@ class ImageInfoFallback(c_io.ComfyNode):
                 Const.IMAGEINFO_TYPE.Input(
                     Const.IMAGEINFO_FALLBACK,
                     display_name="image_info_fallback",
+                    optional=True,
                 ),
             ],
             outputs=[
@@ -43,6 +44,6 @@ class ImageInfoFallback(c_io.ComfyNode):
             extras_key=Const.IMAGEINFO_EXTRAS,
             positive_key=Const.IMAGEINFO_POSITIVE,
             lora_stack_key=Const.IMAGEINFO_LORA_STACK,
-            preserve_lora_stack_when_positive_present=True,
+            preserve_lora_stack_when_positive_present=False,
         )
         return c_io.NodeOutput(merged)

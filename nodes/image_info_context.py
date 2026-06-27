@@ -13,7 +13,14 @@ from ..utils.sampler_params import DENOISE_KEY, sampler_params_payload_or_error
 
 SIZE_PATTERN = re.compile(r"^\s*(-?\d+)\s*[xX]\s*(-?\d+)\s*$")
 SIZE_INPUT_ID = "size"
-BASE_SAMPLER_PARAMS_OUTPUT_ID = "base_sampler_params"
+BASE_SAMPLER_PARAMS_ID = "base_sampler_params"
+BASE_SAMPLER_PARAM_KEYS = (
+    Const.IMAGEINFO_SAMPLER,
+    Const.IMAGEINFO_SCHEDULER,
+    Const.IMAGEINFO_STEPS,
+    Const.IMAGEINFO_SEED,
+    Const.IMAGEINFO_CFG,
+)
 
 FIELDS = (
     (Const.IMAGEINFO_POSITIVE, c_io.String, c_io.String, Cast.str_or_none),
@@ -175,6 +182,12 @@ class ImageInfoContext(c_io.ComfyNode):
                     extra_dict={"forceInput": True},
                 ),
                 Const.IMAGEINFO_EXTRAS_TYPE.Input(Const.IMAGEINFO_EXTRAS, optional=True),
+                Const.SAMPLER_PARAMS_TYPE.Input(
+                    BASE_SAMPLER_PARAMS_ID,
+                    display_name=BASE_SAMPLER_PARAMS_ID,
+                    optional=True,
+                    extra_dict={"forceInput": True},
+                ),
             ],
             outputs=[
                 Const.IMAGEINFO_TYPE.Output(Cast.out_id(Const.IMAGEINFO), display_name=Const.IMAGEINFO),
@@ -200,11 +213,23 @@ class ImageInfoContext(c_io.ComfyNode):
                 ),
                 Const.IMAGEINFO_EXTRAS_TYPE.Output(Cast.out_id(Const.IMAGEINFO_EXTRAS), display_name=Const.IMAGEINFO_EXTRAS),
                 Const.SAMPLER_PARAMS_TYPE.Output(
-                    Cast.out_id(BASE_SAMPLER_PARAMS_OUTPUT_ID),
-                    display_name=BASE_SAMPLER_PARAMS_OUTPUT_ID,
+                    Cast.out_id(BASE_SAMPLER_PARAMS_ID),
+                    display_name=BASE_SAMPLER_PARAMS_ID,
                 ),
             ],
         )
+
+    @classmethod
+    def validate_inputs(
+        cls,
+        base_sampler_params: object = None,
+    ) -> bool | str:
+        # Linked values are unresolved during Comfy validation and arrive as None.
+        if base_sampler_params is None:
+            return True
+
+        _, error = sampler_params_payload_or_error(base_sampler_params, require_all=False)
+        return True if error is None else f"base_sampler_params: {error}"
 
     @classmethod
     def execute(cls, **kwargs) -> c_io.NodeOutput:
@@ -230,6 +255,19 @@ class ImageInfoContext(c_io.ComfyNode):
                         base[Const.IMAGEINFO_EXTRAS] = merged_extras
                     continue
                 base[key] = kwargs.get(key)
+
+        if _include_input_key(connected, kwargs, BASE_SAMPLER_PARAMS_ID):
+            base_sampler_params = kwargs.get(BASE_SAMPLER_PARAMS_ID)
+            if base_sampler_params is not None:
+                payload, error = sampler_params_payload_or_error(base_sampler_params, require_all=False)
+                if error is not None:
+                    raise RuntimeError(
+                        f"Image Info Context: base_sampler_params: {error}"
+                    )
+                if payload is not None:
+                    for key in BASE_SAMPLER_PARAM_KEYS:
+                        if key in payload:
+                            base[key] = payload[key]
 
         for key, _, _, _ in FIELDS:
             if _include_input_key(connected, kwargs, key):

@@ -610,6 +610,8 @@ def _normalize_lora_stack(
     image_info: dict[str, Any],
     lora_hash_hints: Mapping[str, list[str]],
 ) -> None:
+    has_explicit_lora_stack = Const.IMAGEINFO_LORA_STACK in image_info
+    has_explicit_positive = image_info.get(Const.IMAGEINFO_POSITIVE) is not None
     stack = image_info.get(Const.IMAGEINFO_LORA_STACK)
     if not isinstance(stack, list):
         image_info.pop(Const.IMAGEINFO_LORA_STACK, None)
@@ -637,7 +639,7 @@ def _normalize_lora_stack(
         if normalized_item is not None:
             normalized.append(normalized_item)
 
-    if normalized:
+    if normalized or (has_explicit_lora_stack and has_explicit_positive):
         image_info[Const.IMAGEINFO_LORA_STACK] = normalized
     else:
         image_info.pop(Const.IMAGEINFO_LORA_STACK, None)

@@ -1,5 +1,6 @@
 // Copyright 2026 kinorax
 import { app } from "../../scripts/app.js";
+import { clearStaleClassicWidgetWidth } from "./classic_widget_width_compat.js";
 
 const SIZE_TYPE = "IPT-Size";
 const SIZE_PATTERN = /^\s*(-?\d+)\s*[xX]\s*(-?\d+)\s*$/;
@@ -217,6 +218,8 @@ app.registerExtension({
                         syncInputs();
                     },
                     onDraw: (w) => {
+                        // Undo the frontend's stale Vue width before Classic positions the DOM overlay.
+                        clearStaleClassicWidgetWidth(w);
                         const disabled = Boolean(w.computedDisabled);
                         if (lastDisabled !== disabled) {
                             widthInput.disabled = disabled;

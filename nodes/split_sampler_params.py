@@ -64,7 +64,7 @@ class SplitSamplerParams(c_io.ComfyNode):
         if sampler_params is None:
             return True
 
-        _, error = sampler_params_payload_or_error(sampler_params)
+        _, error = sampler_params_payload_or_error(sampler_params, require_all=False)
         return True if error is None else error
 
     @classmethod
@@ -72,8 +72,8 @@ class SplitSamplerParams(c_io.ComfyNode):
         cls,
         sampler_params: object,
     ) -> c_io.NodeOutput:
-        payload, error = sampler_params_payload_or_error(sampler_params)
-        if payload is None or error is not None:
+        payload, error = sampler_params_payload_or_error(sampler_params, require_all=False)
+        if error is not None:
             raise RuntimeError(f"Split Sampler Params: {error or 'sampler_params is required'}")
 
         return c_io.NodeOutput(*split_sampler_params_values(payload))

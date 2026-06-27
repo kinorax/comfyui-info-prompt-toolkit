@@ -1,6 +1,7 @@
 // Copyright 2026 kinorax
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { clearStaleClassicWidgetWidth } from "./classic_widget_width_compat.js";
 
 const TARGET_NODE_TYPES = new Set([
     "IPT-MaskOverlayComparer",
@@ -293,6 +294,10 @@ function createComparerState(node) {
         getMinHeight: () => MIN_HEIGHT,
         getHeight: () => MIN_HEIGHT,
         getMaxHeight: () => MIN_HEIGHT,
+        onDraw: (w) => {
+            // Keep the comparer tied to its node instead of the leaked Vue wrapper width.
+            clearStaleClassicWidgetWidth(w);
+        },
     });
     widget.serialize = false;
     widget.options = widget.options ?? {};

@@ -33,18 +33,42 @@ EXTRA_HASHES = "Hashes"
 
 HASH_ALGO = "sha256"
 
+MODEL_REFERENCE_HASH_EXTRAS_BY_FIELD = {
+    IMAGEINFO_MODEL: EXTRA_MODEL_HASH,
+    IMAGEINFO_REFINER_MODEL: EXTRA_REFINER_HASH,
+    IMAGEINFO_DETAILER_MODEL: EXTRA_DETAILER_HASH,
+    IMAGEINFO_LORA_STACK: EXTRA_LORA_HASHES,
+    IMAGEINFO_CLIP: EXTRA_CLIP_HASHES,
+    IMAGEINFO_VAE: EXTRA_VAE_HASH,
+}
 
-def clear_representative_hash_extras(image_info: Mapping[str, Any] | None) -> dict[str, Any]:
+
+def clear_model_reference_hash_extras(
+    image_info: Mapping[str, Any] | None,
+    fields: Iterable[str] | None = None,
+) -> dict[str, Any]:
     output = dict(image_info) if isinstance(image_info, Mapping) else {}
     extras_raw = output.get(IMAGEINFO_EXTRAS)
-    extras: dict[str, Any] = dict(extras_raw) if isinstance(extras_raw, Mapping) else {}
+    if not isinstance(extras_raw, Mapping):
+        if fields is None:
+            output.pop(IMAGEINFO_EXTRAS, None)
+        return output
 
-    extras.pop(EXTRA_LORA_HASHES, None)
-    extras.pop(EXTRA_CLIP_HASHES, None)
-    extras.pop(EXTRA_VAE_HASH, None)
-    extras.pop(EXTRA_MODEL_HASH, None)
-    extras.pop(EXTRA_REFINER_HASH, None)
-    extras.pop(EXTRA_DETAILER_HASH, None)
+    if fields is None:
+        hash_extra_keys = set(MODEL_REFERENCE_HASH_EXTRAS_BY_FIELD.values())
+    else:
+        hash_extra_keys = set()
+        for field in fields:
+            extra_key = MODEL_REFERENCE_HASH_EXTRAS_BY_FIELD.get(field)
+            if extra_key is not None:
+                hash_extra_keys.add(extra_key)
+
+    if not hash_extra_keys:
+        return output
+
+    extras: dict[str, Any] = dict(extras_raw)
+    for key in hash_extra_keys:
+        extras.pop(key, None)
     extras.pop(EXTRA_HASHES, None)
 
     if extras:
@@ -52,6 +76,10 @@ def clear_representative_hash_extras(image_info: Mapping[str, Any] | None) -> di
     else:
         output.pop(IMAGEINFO_EXTRAS, None)
     return output
+
+
+def clear_representative_hash_extras(image_info: Mapping[str, Any] | None) -> dict[str, Any]:
+    return clear_model_reference_hash_extras(image_info)
 
 
 def add_civitai_hash_extras(image_info: Mapping[str, Any] | None) -> dict[str, Any]:

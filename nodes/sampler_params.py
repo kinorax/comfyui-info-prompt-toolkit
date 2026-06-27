@@ -12,6 +12,7 @@ from ..utils.sampler_params import (
     DENOISE_MIN,
     SAMPLER_PARAMS_KEY,
     SEED_MAX,
+    SEED_MIN,
     STEPS_MAX,
     sampler_params_payload_or_error,
 )
@@ -63,7 +64,7 @@ class SamplerParams(c_io.ComfyNode):
                 c_io.Int.Input(
                     Const.IMAGEINFO_SEED,
                     default=_DEFAULT_SEED,
-                    min=0,
+                    min=SEED_MIN,
                     max=SEED_MAX,
                     control_after_generate=False,
                     tooltip="Sampling seed",
