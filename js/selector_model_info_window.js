@@ -20,11 +20,16 @@ const INFO_POLL_MAX_ATTEMPTS = 8;
 const INFO_POLL_INTERVAL_MS = 250;
 const THUMBNAIL_POLL_MAX_ATTEMPTS = 12;
 const THUMBNAIL_POLL_INTERVAL_MS = 350;
+const USER_NOTE_READY_POLL_MAX_ATTEMPTS = 5;
+const USER_NOTE_READY_POLL_INTERVAL_MS = 1000;
 const LORA_TAG_ENSURE_TIMEOUT_MS = 2500;
 const LORA_TAG_TERMINAL_STATES = new Set(["ready", "empty", "no_metadata", "unsupported", "error"]);
 const MISSING_LOCAL_MESSAGE = "This model file is not available in the current environment.";
+const RUNTIME_SETTING_PROFILE_KEY = "runtime_settings_profile";
+const RUNTIME_SETTING_PROFILE_SDXL = "sdxl";
 const RUNTIME_SETTING_CLIP_LAST_LAYER_KEY = "stop_at_clip_layer";
 const RUNTIME_SETTING_SD3_SHIFT_KEY = "model_sampling_sd3_shift";
+const MODEL_USER_NOTE_MAX_LENGTH = 20000;
 const COPYABLE_HASH_BUTTONS = [
     { algo: "sha256", label: "SHA256" },
     { algo: "crc32", label: "CRC32" },
@@ -160,20 +165,28 @@ function installStyle() {
             align-items: start;
         }
         .IPT-model-info-main {
+            --ipt-model-info-preview-height: 250px;
             display: grid;
             grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
             align-items: start;
             gap: 12px;
         }
         .IPT-model-info-main-left {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
             min-width: 0;
+            height: var(--ipt-model-info-preview-height);
+            max-height: var(--ipt-model-info-preview-height);
+            overflow-y: auto;
+            padding-right: 4px;
         }
         .IPT-model-info-preview {
             align-self: start;
         }
         .IPT-model-info-preview-frame {
             width: 100%;
-            height: 250px;
+            height: var(--ipt-model-info-preview-height);
             border: 1px solid #303748;
             border-radius: 6px;
             background: #10141d;
@@ -220,7 +233,6 @@ function installStyle() {
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
-            margin-top: 8px;
         }
         .IPT-model-info-hash-button {
             padding: 3px 8px;
@@ -239,6 +251,63 @@ function installStyle() {
             gap: 8px;
             align-items: center;
             justify-content: space-between;
+        }
+        .IPT-model-info-note {
+            display: flex;
+            flex-direction: column;
+            flex: 1 1 auto;
+            gap: 4px;
+            min-height: 0;
+            border: 1px solid #313748;
+            border-radius: 6px;
+            background: #171c27;
+            padding: 6px;
+        }
+        .IPT-model-info-note-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .IPT-model-info-note-title {
+            font-weight: 700;
+            font-size: 13px;
+        }
+        .IPT-model-info-note-save {
+            padding: 3px 10px;
+            border-radius: 4px;
+            border: 1px solid #4a5160;
+            background: #202636;
+            color: #f2f6ff;
+            cursor: pointer;
+        }
+        .IPT-model-info-note-save:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+        .IPT-model-info-note-input {
+            flex: 1 1 auto;
+            width: 100%;
+            height: auto;
+            min-height: 54px;
+            resize: none;
+            box-sizing: border-box;
+            border: 1px solid #4a5160;
+            border-radius: 4px;
+            background: #10141d;
+            color: #f2f6ff;
+            padding: 8px;
+            font: inherit;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .IPT-model-info-note-status {
+            color: #aeb7c8;
+            font-size: 12px;
+            line-height: 1.2;
+        }
+        .IPT-model-info-note-status.IPT-model-info-note-status-error {
+            color: #ffb4b4;
         }
         .IPT-model-info-lora-title {
             font-weight: 700;
@@ -296,6 +365,9 @@ function installStyle() {
             grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
             gap: 8px 10px;
             align-items: center;
+        }
+        .IPT-model-info-settings-grid[hidden] {
+            display: none;
         }
         .IPT-model-info-settings-label {
             color: #9fb0ce;
@@ -368,10 +440,8 @@ function installStyle() {
                 grid-template-columns: 1fr;
             }
             .IPT-model-info-main {
+                --ipt-model-info-preview-height: 220px;
                 grid-template-columns: 1fr;
-            }
-            .IPT-model-info-preview-frame {
-                height: 220px;
             }
             .IPT-model-info-settings-grid {
                 grid-template-columns: 1fr;
@@ -458,6 +528,8 @@ async function fetchModelReference({
     includeLoraTags = false,
     ensureLoraTags = false,
     ensureTimeoutMs = null,
+    enqueueLocalHash = true,
+    resolveRemote = true,
 }) {
     const response = await api.fetchApi("/ipt/model-reference/resolve", {
         method: "POST",
@@ -470,8 +542,8 @@ async function fetchModelReference({
             sha256: normalizeSha256(sha256) || undefined,
             name_raw: nameRaw || relativePath || undefined,
             hash_hints: Array.isArray(hashHints) ? hashHints : undefined,
-            enqueue_local_hash: true,
-            resolve_remote: true,
+            enqueue_local_hash: Boolean(enqueueLocalHash),
+            resolve_remote: Boolean(resolveRemote),
             include_lora_tags: includeLoraTags,
             ensure_lora_tags: includeLoraTags && ensureLoraTags,
             ensure_timeout_ms: includeLoraTags && Number.isFinite(Number(ensureTimeoutMs))
@@ -512,6 +584,33 @@ async function upsertModelRuntimeSettings({ folderName, relativePath, runtimeSet
             folder_name: folderName,
             relative_path: relativePath,
             runtime_settings: runtimeSettings || {},
+        }),
+    });
+    if (!response.ok) {
+        let errorText = `HTTP ${response.status}`;
+        try {
+            const body = await response.json();
+            if (body?.error) {
+                errorText = String(body.error);
+            }
+        } catch {
+            // Use default error text.
+        }
+        throw new Error(errorText);
+    }
+    return response.json();
+}
+
+async function upsertModelUserNote({ folderName, relativePath, userNote }) {
+    const response = await api.fetchApi("/ipt/model-user-note/upsert", {
+        method: "POST",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({
+            folder_name: folderName,
+            relative_path: relativePath,
+            user_note: userNote,
         }),
     });
     if (!response.ok) {
@@ -658,6 +757,8 @@ class ModelInfoWindow {
         this.titleElement = null;
         this.thumbnailObjectUrl = "";
         this.thumbnailLoadToken = 0;
+        this.userNoteReadinessToken = 0;
+        this.loadToken = 0;
     }
 
     show() {
@@ -778,6 +879,8 @@ class ModelInfoWindow {
     }
 
     close() {
+        this.loadToken += 1;
+        this.cancelUserNoteReadinessPoll();
         this.cancelThumbnailLoad();
         this.revokeThumbnailObjectUrl();
         this.element?.remove();
@@ -800,6 +903,7 @@ class ModelInfoWindow {
         if (!this.content) {
             return;
         }
+        this.cancelUserNoteReadinessPoll();
         this.cancelThumbnailLoad();
         this.revokeThumbnailObjectUrl();
         this.content.replaceChildren();
@@ -892,31 +996,35 @@ class ModelInfoWindow {
             }
             value.appendChild(textNode);
 
-            if (labelText === "Base Model" && copyableHashes.length > 0) {
-                const hashButtons = document.createElement("div");
-                hashButtons.className = "IPT-model-info-hash-buttons";
-                for (const hashEntry of copyableHashes) {
-                    const button = document.createElement("button");
-                    button.type = "button";
-                    button.className = "IPT-model-info-hash-button";
-                    button.textContent = hashEntry.label;
-                    button.title = hashEntry.value;
-                    button.addEventListener("click", async () => {
-                        button.disabled = true;
-                        const originalLabel = hashEntry.label;
-                        const copied = await copyToClipboard(hashEntry.value);
-                        button.textContent = copied ? "Copied" : "Failed";
-                        window.setTimeout(() => {
-                            button.disabled = false;
-                            button.textContent = originalLabel;
-                        }, 900);
-                    });
-                    hashButtons.appendChild(button);
-                }
-                value.appendChild(hashButtons);
-            }
-
             table.append(label, value);
+        }
+
+        if (copyableHashes.length > 0) {
+            const label = document.createElement("div");
+            label.className = "IPT-model-info-field-label";
+            label.textContent = "Hashes";
+
+            const hashButtons = document.createElement("div");
+            hashButtons.className = "IPT-model-info-hash-buttons";
+            for (const hashEntry of copyableHashes) {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "IPT-model-info-hash-button";
+                button.textContent = hashEntry.label;
+                button.title = hashEntry.value;
+                button.addEventListener("click", async () => {
+                    button.disabled = true;
+                    const originalLabel = hashEntry.label;
+                    const copied = await copyToClipboard(hashEntry.value);
+                    button.textContent = copied ? "Copied" : "Failed";
+                    window.setTimeout(() => {
+                        button.disabled = false;
+                        button.textContent = originalLabel;
+                    }, 900);
+                });
+                hashButtons.appendChild(button);
+            }
+            table.append(label, hashButtons);
         }
         (parentElement || this.content).appendChild(table);
     }
@@ -932,9 +1040,14 @@ class ModelInfoWindow {
         }
     }
 
-    renderModelTopSection(folderName, relativePath, modelInfo, { showPreview = true } = {}) {
+    renderModelTopSection(
+        folderName,
+        relativePath,
+        modelInfo,
+        { showPreview = true, userNoteConfig = null } = {},
+    ) {
         if (!this.content) {
-            return;
+            return null;
         }
 
         const main = document.createElement("div");
@@ -943,6 +1056,13 @@ class ModelInfoWindow {
         const left = document.createElement("div");
         left.className = "IPT-model-info-main-left";
         this.renderModelFields(modelInfo, left);
+        let userNoteController = null;
+        if (userNoteConfig) {
+            userNoteController = this.renderUserNoteSection({
+                ...userNoteConfig,
+                parentElement: left,
+            });
+        }
 
         const preview = document.createElement("div");
         preview.className = "IPT-model-info-preview";
@@ -972,6 +1092,7 @@ class ModelInfoWindow {
         if (showPreview) {
             void this.loadThumbnailImage(folderName, relativePath, image, status);
         }
+        return userNoteController;
     }
 
     async loadThumbnailImage(folderName, relativePath, imageElement, statusElement) {
@@ -1045,6 +1166,163 @@ class ModelInfoWindow {
         }
     }
 
+    renderUserNoteSection({
+        folderName,
+        relativePath,
+        userNote,
+        editable,
+        hasLocalFile,
+        parentElement = null,
+    }) {
+        if (!this.content) {
+            return null;
+        }
+
+        const section = document.createElement("section");
+        section.className = "IPT-model-info-note";
+
+        const header = document.createElement("div");
+        header.className = "IPT-model-info-note-header";
+
+        const title = document.createElement("div");
+        title.className = "IPT-model-info-note-title";
+        title.textContent = "Notes";
+
+        const saveButton = document.createElement("button");
+        saveButton.type = "button";
+        saveButton.className = "IPT-model-info-note-save";
+        saveButton.textContent = "Save";
+        header.append(title, saveButton);
+
+        const textarea = document.createElement("textarea");
+        textarea.className = "IPT-model-info-note-input";
+        textarea.maxLength = MODEL_USER_NOTE_MAX_LENGTH;
+        textarea.placeholder = "Add notes about this model...";
+        textarea.value = String(userNote ?? "");
+
+        const status = document.createElement("div");
+        status.className = "IPT-model-info-note-status";
+
+        const setStatus = (text, { isError = false } = {}) => {
+            status.textContent = text;
+            status.classList.toggle("IPT-model-info-note-status-error", Boolean(isError));
+        };
+        const setDisabled = (disabled) => {
+            saveButton.disabled = disabled;
+            textarea.disabled = disabled;
+        };
+        let noteEditable = Boolean(editable && relativePath);
+
+        section.append(header, textarea, status);
+        (parentElement || this.content).appendChild(section);
+
+        saveButton.addEventListener("click", async () => {
+            if (!noteEditable) {
+                return;
+            }
+            setDisabled(true);
+            setStatus("Saving...");
+            try {
+                const response = await upsertModelUserNote({
+                    folderName,
+                    relativePath,
+                    userNote: textarea.value,
+                });
+                textarea.value = String(response?.user_note ?? "");
+                setStatus(textarea.value ? "Saved." : "Note removed.");
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                setStatus(`Save failed: ${message}`, { isError: true });
+            } finally {
+                setDisabled(!noteEditable);
+            }
+        });
+
+        const enable = (nextUserNote) => {
+            if (noteEditable || !relativePath || !section.isConnected) {
+                return false;
+            }
+            textarea.value = String(nextUserNote ?? "");
+            noteEditable = true;
+            setDisabled(false);
+            setStatus("Stored locally for this model. Saving an empty note removes it.");
+            return true;
+        };
+
+        if (!noteEditable) {
+            setDisabled(true);
+            setStatus(hasLocalFile
+                ? "Local model index is still preparing..."
+                : "Notes can be edited only for local files.");
+        } else {
+            setDisabled(false);
+            setStatus("Stored locally for this model. Saving an empty note removes it.");
+        }
+
+        return {
+            enable,
+            setPreparingStatus(text) {
+                if (noteEditable || !section.isConnected) {
+                    return;
+                }
+                setStatus(text);
+            },
+        };
+    }
+
+    cancelUserNoteReadinessPoll() {
+        this.userNoteReadinessToken += 1;
+    }
+
+    async pollUserNoteReadiness({ folderName, relativePath, controller }) {
+        if (!controller || !relativePath) {
+            return;
+        }
+
+        const token = this.userNoteReadinessToken + 1;
+        this.userNoteReadinessToken = token;
+
+        for (let attempt = 1; attempt <= USER_NOTE_READY_POLL_MAX_ATTEMPTS; attempt += 1) {
+            await waitMs(USER_NOTE_READY_POLL_INTERVAL_MS);
+            if (!this.element || this.userNoteReadinessToken !== token) {
+                return;
+            }
+
+            try {
+                const payload = await fetchModelReference({
+                    folderName,
+                    relativePath,
+                    sha256: this.source.sha256,
+                    nameRaw: this.source.nameRaw,
+                    hashHints: this.source.hashHints,
+                    enqueueLocalHash: false,
+                    resolveRemote: false,
+                });
+                if (!this.element || this.userNoteReadinessToken !== token) {
+                    return;
+                }
+                if (payload?.sha256) {
+                    this.source.sha256 = normalizeSha256(payload.sha256);
+                    setSha256WidgetValue(this.node, this.slot, this.source.sha256);
+                }
+                if (payload?.local_status !== "present") {
+                    controller.setPreparingStatus("Notes can be edited only for local files.");
+                    return;
+                }
+                if (payload?.user_note_editable) {
+                    controller.enable(payload?.user_note || "");
+                    return;
+                }
+            } catch {
+                // Keep waiting for the local index. Refresh can restart a failed hash task.
+            }
+        }
+
+        if (this.element && this.userNoteReadinessToken === token) {
+            controller.setPreparingStatus("Local model index is still preparing. Press Refresh.");
+        }
+    }
+
     renderRuntimeSettingsSection({
         folderName,
         relativePath,
@@ -1055,7 +1333,7 @@ class ModelInfoWindow {
         if (!this.content) {
             return;
         }
-        if (folderName !== "checkpoints" && folderName !== "diffusion_models") {
+        if (folderName !== "checkpoints") {
             return;
         }
 
@@ -1086,31 +1364,38 @@ class ModelInfoWindow {
 
         const help = document.createElement("div");
         help.className = "IPT-model-info-settings-help";
-        help.textContent = folderName === "checkpoints"
-            ? "Checkpoint applies CLIP Set Last Layer and ModelSamplingSD3."
-            : "Diffusion Model applies ModelSamplingSD3.";
+        help.textContent = "Choose model-specific settings manually; Base Model metadata is not used.";
         section.appendChild(help);
 
-        const grid = document.createElement("div");
-        grid.className = "IPT-model-info-settings-grid";
+        const profileGrid = document.createElement("div");
+        profileGrid.className = "IPT-model-info-settings-grid";
 
-        let clipLastLayerInput = null;
-        if (folderName === "checkpoints") {
-            const label = document.createElement("label");
-            label.className = "IPT-model-info-settings-label";
-            label.textContent = "CLIP last layer";
+        const profileLabel = document.createElement("label");
+        profileLabel.className = "IPT-model-info-settings-label";
+        profileLabel.textContent = "Model-specific settings";
 
-            clipLastLayerInput = document.createElement("input");
-            clipLastLayerInput.type = "number";
-            clipLastLayerInput.step = "1";
-            clipLastLayerInput.max = "-1";
-            clipLastLayerInput.placeholder = "unset";
-            clipLastLayerInput.className = "IPT-model-info-settings-input";
-            const clipValue = parseNullableInt(runtimeSettings?.[RUNTIME_SETTING_CLIP_LAST_LAYER_KEY]);
-            clipLastLayerInput.value = clipValue === null ? "" : String(clipValue);
+        const profileSelect = document.createElement("select");
+        profileSelect.className = "IPT-model-info-settings-input";
+        profileSelect.append(
+            new Option("None", ""),
+            new Option("SDXL", RUNTIME_SETTING_PROFILE_SDXL),
+        );
+        profileGrid.append(profileLabel, profileSelect);
+        section.appendChild(profileGrid);
 
-            grid.append(label, clipLastLayerInput);
-        }
+        const advancedGrid = document.createElement("div");
+        advancedGrid.className = "IPT-model-info-settings-grid";
+
+        const clipLabel = document.createElement("label");
+        clipLabel.className = "IPT-model-info-settings-label";
+        clipLabel.textContent = "CLIP last layer";
+
+        const clipLastLayerInput = document.createElement("input");
+        clipLastLayerInput.type = "number";
+        clipLastLayerInput.step = "1";
+        clipLastLayerInput.max = "-1";
+        clipLastLayerInput.placeholder = "unset";
+        clipLastLayerInput.className = "IPT-model-info-settings-input";
 
         const sd3Label = document.createElement("label");
         sd3Label.className = "IPT-model-info-settings-label";
@@ -1121,11 +1406,9 @@ class ModelInfoWindow {
         sd3ShiftInput.step = "0.01";
         sd3ShiftInput.placeholder = "unset";
         sd3ShiftInput.className = "IPT-model-info-settings-input";
-        const sd3ShiftValue = parseNullableFloat(runtimeSettings?.[RUNTIME_SETTING_SD3_SHIFT_KEY]);
-        sd3ShiftInput.value = sd3ShiftValue === null ? "" : String(sd3ShiftValue);
 
-        grid.append(sd3Label, sd3ShiftInput);
-        section.appendChild(grid);
+        advancedGrid.append(clipLabel, clipLastLayerInput, sd3Label, sd3ShiftInput);
+        section.appendChild(advancedGrid);
 
         const status = document.createElement("div");
         status.className = "IPT-model-info-settings-status";
@@ -1139,11 +1422,33 @@ class ModelInfoWindow {
         const setDisabled = (disabled) => {
             saveButton.disabled = disabled;
             resetButton.disabled = disabled;
+            profileSelect.disabled = disabled;
             sd3ShiftInput.disabled = disabled;
-            if (clipLastLayerInput) {
-                clipLastLayerInput.disabled = disabled;
-            }
+            clipLastLayerInput.disabled = disabled;
         };
+
+        const updateProfileVisibility = () => {
+            advancedGrid.hidden = profileSelect.value !== RUNTIME_SETTING_PROFILE_SDXL;
+        };
+
+        const applyRuntimeSettings = (settings) => {
+            const clipValue = parseNullableInt(settings?.[RUNTIME_SETTING_CLIP_LAST_LAYER_KEY]);
+            const shiftValue = parseNullableFloat(settings?.[RUNTIME_SETTING_SD3_SHIFT_KEY]);
+            const storedProfile = String(settings?.[RUNTIME_SETTING_PROFILE_KEY] ?? "").trim().toLowerCase();
+            // This UI fallback mirrors the server compatibility rule so a v1
+            // row never hides settings while the database upgrade is pending.
+            profileSelect.value = storedProfile === RUNTIME_SETTING_PROFILE_SDXL
+                || clipValue !== null
+                || shiftValue !== null
+                ? RUNTIME_SETTING_PROFILE_SDXL
+                : "";
+            clipLastLayerInput.value = clipValue === null ? "" : String(clipValue);
+            sd3ShiftInput.value = shiftValue === null ? "" : String(shiftValue);
+            updateProfileVisibility();
+        };
+
+        applyRuntimeSettings(runtimeSettings);
+        profileSelect.addEventListener("change", updateProfileVisibility);
 
         if (!editable || !relativePath) {
             setDisabled(true);
@@ -1157,15 +1462,28 @@ class ModelInfoWindow {
         }
 
         const collectRuntimeSettings = () => {
-            const nextSettings = {};
-            if (clipLastLayerInput) {
-                const parsedClipLastLayer = parseNullableInt(clipLastLayerInput.value);
-                if (parsedClipLastLayer !== null && parsedClipLastLayer <= -1) {
-                    nextSettings[RUNTIME_SETTING_CLIP_LAST_LAYER_KEY] = parsedClipLastLayer;
-                }
+            if (profileSelect.value !== RUNTIME_SETTING_PROFILE_SDXL) {
+                return {};
             }
-            const parsedSd3Shift = parseNullableFloat(sd3ShiftInput.value);
-            if (parsedSd3Shift !== null) {
+
+            const nextSettings = {
+                [RUNTIME_SETTING_PROFILE_KEY]: RUNTIME_SETTING_PROFILE_SDXL,
+            };
+            const clipText = clipLastLayerInput.value.trim();
+            if (clipText) {
+                const parsedClipLastLayer = Number(clipText);
+                if (!Number.isSafeInteger(parsedClipLastLayer) || parsedClipLastLayer > -1) {
+                    throw new Error("CLIP last layer must be an integer less than or equal to -1.");
+                }
+                nextSettings[RUNTIME_SETTING_CLIP_LAST_LAYER_KEY] = parsedClipLastLayer;
+            }
+
+            const shiftText = sd3ShiftInput.value.trim();
+            if (shiftText) {
+                const parsedSd3Shift = Number(shiftText);
+                if (!Number.isFinite(parsedSd3Shift)) {
+                    throw new Error("ModelSamplingSD3 shift must be a finite number.");
+                }
                 nextSettings[RUNTIME_SETTING_SD3_SHIFT_KEY] = parsedSd3Shift;
             }
             return nextSettings;
@@ -1183,12 +1501,7 @@ class ModelInfoWindow {
                 const nextSettings = response?.runtime_settings && typeof response.runtime_settings === "object"
                     ? response.runtime_settings
                     : {};
-                if (clipLastLayerInput) {
-                    const nextClipValue = parseNullableInt(nextSettings?.[RUNTIME_SETTING_CLIP_LAST_LAYER_KEY]);
-                    clipLastLayerInput.value = nextClipValue === null ? "" : String(nextClipValue);
-                }
-                const nextShiftValue = parseNullableFloat(nextSettings?.[RUNTIME_SETTING_SD3_SHIFT_KEY]);
-                sd3ShiftInput.value = nextShiftValue === null ? "" : String(nextShiftValue);
+                applyRuntimeSettings(nextSettings);
                 setStatus("Saved.");
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
@@ -1199,7 +1512,12 @@ class ModelInfoWindow {
         };
 
         saveButton.addEventListener("click", () => {
-            void runSave(collectRuntimeSettings());
+            try {
+                void runSave(collectRuntimeSettings());
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                setStatus(message, { isError: true });
+            }
         });
         resetButton.addEventListener("click", () => {
             void runSave({});
@@ -1309,6 +1627,8 @@ class ModelInfoWindow {
             return;
         }
 
+        const loadToken = this.loadToken + 1;
+        this.loadToken = loadToken;
         this.clearContent();
         this.setStatus("Loading model metadata...");
 
@@ -1330,7 +1650,11 @@ class ModelInfoWindow {
                     includeLoraTags,
                     ensureLoraTags,
                     ensureTimeoutMs,
+                    enqueueLocalHash: attempt === 1,
                 });
+                if (!this.element || !this.content || this.loadToken !== loadToken) {
+                    return;
+                }
                 if (payload?.sha256) {
                     this.source.sha256 = normalizeSha256(payload.sha256);
                     setSha256WidgetValue(this.node, this.slot, this.source.sha256);
@@ -1350,7 +1674,7 @@ class ModelInfoWindow {
                 ) {
                     break;
                 }
-                if (!this.element || !this.content) {
+                if (!this.element || !this.content || this.loadToken !== loadToken) {
                     return;
                 }
                 if (attempt < INFO_POLL_MAX_ATTEMPTS) {
@@ -1363,7 +1687,7 @@ class ModelInfoWindow {
                 }
             }
 
-            if (!this.element || !this.content) {
+            if (!this.element || !this.content || this.loadToken !== loadToken) {
                 return;
             }
 
@@ -1382,12 +1706,25 @@ class ModelInfoWindow {
                 this.renderMissingLocalNotice(payload?.download_candidate || null);
             }
 
-            if (payload?.model_info || payload?.remote_status === "not_found" || !hasLocalFile) {
-                this.renderModelTopSection(folderName, resolvedRelativePath, {
-                    ...(payload?.model_info || {}),
-                    copyable_hashes: payload?.copyable_hashes || {},
-                }, {
-                    showPreview: hasLocalFile && Boolean(resolvedRelativePath),
+            const userNoteController = this.renderModelTopSection(folderName, resolvedRelativePath, {
+                ...(payload?.model_info || {}),
+                copyable_hashes: payload?.copyable_hashes || {},
+            }, {
+                showPreview: hasLocalFile && Boolean(resolvedRelativePath),
+                userNoteConfig: {
+                    folderName,
+                    relativePath: resolvedRelativePath,
+                    userNote: payload?.user_note || "",
+                    editable: Boolean(payload?.user_note_editable),
+                    hasLocalFile,
+                },
+            });
+
+            if (hasLocalFile && !payload?.user_note_editable && resolvedRelativePath) {
+                void this.pollUserNoteReadiness({
+                    folderName,
+                    relativePath: resolvedRelativePath,
+                    controller: userNoteController,
                 });
             }
 
@@ -1416,7 +1753,7 @@ class ModelInfoWindow {
                 this.setStatus(message);
             }
         } catch (error) {
-            if (!this.element || !this.content) {
+            if (!this.element || !this.content || this.loadToken !== loadToken) {
                 return;
             }
             this.clearContent();

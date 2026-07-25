@@ -2,8 +2,9 @@
 
 # ComfyUI-Info-Prompt-Toolkit
 
-ComfyUIの配線の簡素化と再利用性の向上を軸に、試行結果を次の制作へ活かしやすくするための拡張ノード集です。  
-主な機能は、Civitai互換を意識した画像メタデータ保存、同名 `.txt` キャプション保存、XY Plot、Tiled Sampling（`SDXL (with ControlNet Tile)` と `Anima`）、SAM3、Detailer、PixAI Tagger、OppaiOracle Tagger、wildcards、Dynamic Promptsで、ワークフローを強化できます。
+プロンプトやモデル情報など、公開したくない生成情報だけを選んで暗号化し、残りは A1111 / Civitai 互換メタデータとして保存できる ComfyUI 拡張ノード集です。暗号化した項目は本ツールキットの Reader ノードで復元されるため、生成条件の再利用性を保ちながら、画像に含める情報の公開範囲を制御できます。
+
+`image_info` を軸に ComfyUI の配線を簡素化し、試行結果を次の制作へ引き継ぎやすくします。ほかにも、同名 `.txt` キャプション保存、XY Plot、Tiled Sampling（`SDXL (with ControlNet Tile)` と `Anima`）、SAM3、Detailer、PixAI Tagger、OppaiOracle Tagger、wildcards、Dynamic Prompts を備えています。
 
 ## Installation
 
@@ -239,10 +240,11 @@ pip install -r requirements.txt
 <a href="assets/readme/load-new-model-and-use-loaded-model.webp"><img align="left" hspace="16" src="assets/readme/load-new-model-and-use-loaded-model.webp" alt="Load New Model and Use Loaded Model" width="210"></a>
 <ul>
   <li><code>Load New Model</code> と <code>Use Loaded Model</code> は、モデル読み込みと再利用を分担するペアノードです。</li>
-  <li><code>Load New Model</code> は、<code>Checkpoint Selector</code> / <code>Diffusion Model Selector</code> などの Selector系ノードから選択モデルを受け取ります。Checkpoint では checkpoint 由来の <code>model</code> / <code>clip</code> / <code>vae</code> を読み出し、Diffusion Model では <code>model</code> を読み出したうえで、必要な CLIP/VAE runtime は任意入力の <code>clip</code> / <code>vae</code> / <code>vae_fallback</code> で補います。同一プロンプト実行中だけ有効な一時 strong cache を使い、同じ raw load の重複を避けます。</li>
-  <li><code>Use Loaded Model</code> は、選択モデル、runtime settings、<code>lora_stack</code>、接続された <code>clip</code> / <code>vae</code> 条件をキーに、最終 runtime 一式をプロセス内キャッシュへ保持します。cache hit 時は lazy 入力の <code>loaded_model</code> / <code>loaded_clip</code> / <code>loaded_vae</code> 側の分岐を評価しません。</li>
-  <li><code>Use Loaded Model</code> は、デフォルトではノード内部で <code>lora_stack</code> を適用します。<code>loaded_model</code> / <code>loaded_clip</code> 側で同じ LoRA 適用を済ませている場合は <code>apply_lora_stack=false</code> にしてください。</li>
-  <li><code>Lora Stack Lorader</code> や <code>TorchCompile</code> 系ノードを <code>Use Loaded Model</code> の前段に挟みたい場合は、<code>Load New Model</code> の出力をそれらへ通し、最終出力を <code>loaded_model</code> / <code>loaded_clip</code> / <code>loaded_vae</code> に接続したうえで <code>apply_lora_stack=false</code> を使います。</li>
+  <li><code>Load New Model</code> は、<code>Checkpoint Selector</code> / <code>Diffusion Model Selector</code> などの Selector系ノードから選択モデルを受け取ります。Checkpoint では checkpoint 由来の <code>model</code> / <code>clip</code> / <code>vae</code> を読み出し、Diffusion Model では <code>model</code> を読み出したうえで、必要な CLIP/VAE runtime は任意入力の <code>clip</code> / <code>vae</code> / <code>vae_fallback</code> で補います。</li>
+  <li>Diffusion Modelで同じCLIP設定を使い続け、CLIPが変更されていない場合は、<code>Use Loaded Model</code>が保持中のCLIPを弱参照インデックス経由で再利用し、モデル切替時のCLIP再ロードを避けます。</li>
+  <li><code>Use Loaded Model</code> は、選択モデル、runtime settings、<code>lora_stack</code>、<code>apply_lora_to_clip</code>、接続された <code>clip</code> / <code>vae</code> 条件をキーに、最終 runtime 一式をプロセス内キャッシュへ保持します。cache hit 時は lazy 入力の <code>loaded_model</code> / <code>loaded_clip</code> / <code>loaded_vae</code> 側の分岐を評価しません。</li>
+  <li><code>Use Loaded Model</code> は、デフォルトではノード内部で <code>lora_stack</code> を適用します。CLIPへ適用しない場合は <code>apply_lora_to_clip=false</code> にするとmodelのみに適用し、CLIPを再利用できます。<code>loaded_model</code> / <code>loaded_clip</code> 側で同じ LoRA 適用を済ませている場合は <code>apply_lora_stack=false</code> にしてください。</li>
+  <li><code>Lora Stack Lorader</code> や <code>TorchCompile</code> 系ノードを <code>Use Loaded Model</code> の前段に挟む場合は、最終出力をlazy入力へ接続して <code>apply_lora_stack=false</code> にします。<code>Lora Stack Lorader</code>にも <code>apply_lora_to_clip</code> があり、外部適用時は <code>Use Loaded Model</code> 側の同名設定を最終CLIP状態に合わせてください。</li>
   <li>キャッシュ挙動は <code>ComfyUI Settings &gt; Info-Prompt-Toolkit &gt; Use Loaded Model キャッシュ</code> で設定できます。<code>自動</code> は最新1件を必ず保持し、古いキャッシュを推定メモリサイズと <code>メモリ予算比率</code> に基づいて削除します。<code>固定</code> はメモリ予算を見ず、<code>最大キャッシュ数</code> まで保持します。<code>最大キャッシュ数</code> の既定値は <code>1</code> で、<code>1</code> から <code>9</code> まで設定できます。</li>
   <li><code>キャッシュログを出力</code> を有効にすると、cache hit / miss / store / evict / clear が ComfyUI の Python コンソールに出力されます。store / evict では推定メモリ量も確認できます。</li>
   <li><code>lora_stack</code> は要素の順序と強度も条件に含まれるため、並び順や値が変わると別条件として扱われます。</li>
@@ -282,9 +284,10 @@ pip install -r requirements.txt
 <a href="assets/readme/selector-nodes.webp"><img align="left" hspace="16" src="assets/readme/selector-nodes.webp" alt="Selector系ノード" width="210"></a>
 <ul>
   <li>Selector系ノードは、checkpoint、diffusion model、LoRA、CLIP、VAE、sampler、scheduler など、ワークフローで再利用したい選択値をまとめて扱うための補助ノード群です。</li>
-  <li>モデル関連の Selector には、<code>Checkpoint Selector</code>、<code>Diffusion Model Selector</code>、<code>Unet Model Selector</code>、<code>Lora Selector</code>、<code>Vae Selector</code>、<code>CLIP Selector</code>、<code>Dual CLIP Selector</code>、<code>Triple CLIP Selector</code>、<code>Quadruple CLIP Selector</code> があります。</li>
+  <li>モデル関連の Selector には、<code>Checkpoint Selector</code>、<code>Diffusion Model Selector</code>、<code>Unet Model Selector</code>、<code>Lora Selector</code>、<code>Power Lora Selector</code>、<code>Vae Selector</code>、<code>CLIP Selector</code>、<code>Dual CLIP Selector</code>、<code>Triple CLIP Selector</code>、<code>Quadruple CLIP Selector</code> があります。</li>
   <li>対応するモデル関連 Selector では、右クリックメニューの <code>View Model Info...</code> から、選択中アセットの SHA256 をキーに Civitai からメタデータを取得し、モデル情報ウィンドウに表示できます。</li>
   <li><code>Lora Selector</code> の <code>View Model Info...</code> では、選択した LoRA のメタデータ解析が完了している場合、タグ頻度付きの LoRA タグ一覧も表示できます。</li>
+  <li><code>Power Lora Selector</code> は任意数の行から LoRA stack を作成し、各行でON/OFF、LoRA、strength、モデル情報表示、削除を操作できます。</li>
   <li>主な接続先は <code>Image Info Defaults</code>、<code>Image Info Context</code>、<code>Load New Model</code>、<code>Use Loaded Model</code>、<code>XY Plot Modifier</code> です。</li>
 </ul>
 <br clear="left">
@@ -293,15 +296,21 @@ pip install -r requirements.txt
 
 ### `Image Saver` でメタデータ付き保存
 
-<a href="assets/readme/wf-sample1.webp"><img src="assets/readme/wf-sample1.webp" alt="Image Saver でメタデータ付き保存を行うワークフロー例" width="900"></a>
+<a href="example_workflows/Save%20Images%20With%20Metadata%20Using%20Image%20Saver.webp"><img src="example_workflows/Save%20Images%20With%20Metadata%20Using%20Image%20Saver.webp" alt="Image Saver でメタデータ付き保存を行うワークフロー例" width="900"></a>
 
 生成ワークフローの終端で `Image Saver` を使い、再利用しやすいメタデータ付き画像として保存する例です。埋め込まれた `A1111 infotext` / `image_info` により、prompt、model、LoRA、sampler などの設定を後から参照できます。
 
 ### `Image Reader` のメタデータから生成
 
-<a href="assets/readme/wf-sample2.webp"><img src="assets/readme/wf-sample2.webp" alt="Image Reader で読み込んだメタデータをもとに生成するワークフロー例" width="900"></a>
+<a href="example_workflows/Generate%20From%20Metadata%20Loaded%20by%20Image%20Reader.webp"><img src="example_workflows/Generate%20From%20Metadata%20Loaded%20by%20Image%20Reader.webp" alt="Image Reader で読み込んだメタデータをもとに生成するワークフロー例" width="900"></a>
 
 メタデータ付き画像を `Image Reader` で読み込み、復元された `image_info` をワークフローへ渡して生成する例です。過去の設定を起点に、再現や追加調整へ進めやすくなります。
+
+### メタデータを整理・暗号化して `Referenced Image Saver` で保存
+
+<a href="example_workflows/Filter%20and%20Encrypt%20Metadata%20Before%20Saving%20With%20Referenced%20Image%20Saver.webp"><img src="example_workflows/Filter%20and%20Encrypt%20Metadata%20Before%20Saving%20With%20Referenced%20Image%20Saver.webp" alt="メタデータを整理・暗号化して Referenced Image Saver で保存するワークフロー例" width="900"></a>
+
+`Image Reader`で既存画像を読み込み、`image_info`から指定した主要フィールドと追加キーを削除し、残すフィールドのうち暗号化する対象を設定して、`Referenced Image Saver`で保存する例です。メタデータを「削除する」「公開状態で残す」「暗号化して残す」に振り分けながら、画像ピクセルを再エンコードせずに保存できます。
 
 ## License
 

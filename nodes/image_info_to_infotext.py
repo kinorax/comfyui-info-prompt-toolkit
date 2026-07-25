@@ -4,11 +4,7 @@ from __future__ import annotations
 from comfy_api.latest import io as c_io
 
 from .. import const as Const
-from ..utils.a1111_infotext import image_info_to_a1111_infotext
-from ..utils.image_info_hash_extras import (
-    add_civitai_hash_extras,
-    clear_representative_hash_extras,
-)
+from ..utils.metadata_encryption import image_info_to_public_infotext
 
 
 class ImageInfoToInfotext(c_io.ComfyNode):
@@ -37,7 +33,5 @@ class ImageInfoToInfotext(c_io.ComfyNode):
         cls,
         image_info: dict[str, object] | None = None,
     ) -> c_io.NodeOutput:
-        image_info_without_hashes = clear_representative_hash_extras(image_info)
-        image_info_with_hashes = add_civitai_hash_extras(image_info_without_hashes)
-        infotext = image_info_to_a1111_infotext(image_info_with_hashes)
+        infotext = image_info_to_public_infotext(image_info)
         return c_io.NodeOutput(infotext)

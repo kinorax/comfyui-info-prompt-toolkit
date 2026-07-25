@@ -17,6 +17,7 @@ CATEGORY_DEBUG = "Info-Prompt-Toolkit/Debug"
 CATEGORY_UTILITY = "Info-Prompt-Toolkit/Utility"
 
 IMAGEINFO_TYPE = c_io.Custom("IPT-IMAGEINFO")
+IMAGEINFO_ENCRYPTION_TARGETS_TYPE = c_io.Custom("IPT-ImageInfoEncryptionTargets")
 MODEL_TYPE = c_io.Custom("IPT-Model")
 LORA_STACK_TYPE = c_io.Custom("IPT-LoraStack")
 CLIP_TYPE = c_io.Custom("IPT-Clip")
@@ -30,6 +31,7 @@ XY_PLOT_INFO_TYPE = c_io.Custom("IPT-XYPlotInfo")
 DETAILER_CONTROL_TYPE = c_io.Custom("IPT-DetailerControl")
 LOOP_CONTROL_TYPE = c_io.FlowControl
 IMAGEINFO = "image_info"
+IMAGEINFO_ENCRYPTION_TARGETS = "__ipt_encryption_targets"
 VIDEOINFO = "video_info"
 IMAGEINFO_FALLBACK = "fallback_image_info"
 IMAGEINFO_MODEL = "model"

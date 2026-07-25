@@ -16,8 +16,8 @@ from comfy_api.latest import io as c_io
 from .. import const as Const
 from ..utils import cast as Cast
 from ..utils import exif as Exif
-from ..utils.a1111_infotext import a1111_infotext_to_image_info
-from ..utils.image_info_normalizer import normalize_image_info_with_comfy_options
+from ..utils.image_metadata_writer import read_ipt_private_metadata
+from ..utils.metadata_encryption import image_info_from_metadata
 
 _PATH_SOURCE_OPTIONS = ("input", "output")
 
@@ -124,8 +124,8 @@ def _read_image_and_info(image_path: Path) -> tuple[torch.Tensor, Any]:
     img = node_helpers.pillow(Image.open, str(image_path))
 
     a1111_text = Exif.extract_a1111_text(img)
-    image_info = a1111_infotext_to_image_info(a1111_text)
-    image_info = normalize_image_info_with_comfy_options(image_info)
+    encrypted_payload = read_ipt_private_metadata(image_path)
+    image_info = image_info_from_metadata(a1111_text, encrypted_payload, file_name=image_path.name)
 
     frames: list[torch.Tensor] = []
     width, height = None, None

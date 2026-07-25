@@ -10,7 +10,7 @@ from ..utils import cast as Cast
 def _extras_or_none(value: object | None) -> dict[str, object] | None:
     if not isinstance(value, dict):
         return None
-    return dict(value)
+    return value
 
 
 def _combined_extras_or_none(

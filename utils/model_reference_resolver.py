@@ -761,8 +761,24 @@ def resolve_model_reference(
         hash_enqueued = hash_enqueued or lora_hash_enqueued
 
     resolved_hash_hints = list(normalized_hints)
-    runtime_settings: dict[str, int | float] = {}
+    runtime_settings: dict[str, str | int | float] = {}
     runtime_settings_editable = False
+    user_note = ""
+    user_note_editable = False
+    local_content_id = None
+    if local_status == "present" and candidate_relative_path:
+        get_local_content_id = getattr(pipeline, "get_content_id_by_relative_path", None)
+        if callable(get_local_content_id):
+            try:
+                local_content_id = int(
+                    get_local_content_id(
+                        folder_name=folder,
+                        relative_path=candidate_relative_path,
+                    )
+                )
+            except Exception:
+                local_content_id = None
+
     if isinstance(reference_record, Mapping):
         try:
             content_id = int(reference_record.get("content_id"))
@@ -783,6 +799,12 @@ def resolve_model_reference(
                     reference_record.get("runtime_settings"),
                 )
                 runtime_settings_editable = local_status == "present"
+
+    if local_content_id is not None:
+        get_user_note = getattr(pipeline, "get_model_user_note_by_content_id", None)
+        if callable(get_user_note):
+            user_note = str(get_user_note(local_content_id) or "")
+        user_note_editable = True
 
     return {
         "ok": True,
@@ -806,6 +828,8 @@ def resolve_model_reference(
         "runtime_settings": runtime_settings,
         "runtime_settings_supported": is_supported_model_runtime_settings_folder(folder),
         "runtime_settings_editable": runtime_settings_editable,
+        "user_note": user_note,
+        "user_note_editable": user_note_editable,
         "remote_status": remote_status,
         "remote_source": remote_source,
     }

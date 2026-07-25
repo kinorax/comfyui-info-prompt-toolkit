@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from .file_hash_cache import normalize_relative_path
 from .model_runtime_settings import (
+    ModelRuntimeSettings,
     filter_model_runtime_settings_for_folder,
     is_supported_model_runtime_settings_folder,
     normalize_model_runtime_settings,
@@ -24,6 +25,7 @@ except Exception:
 CACHE_DIR_NAME = "info_prompt_toolkit"
 DB_FILE_NAME = "model_lora_metadata.sqlite3"
 _DDL_RELATIVE_PATH = "resources/sql/model-and-lora-metadata-rdb-initial.sql"
+_SCHEMA_VERSION = 2
 
 _HASH_ALGO_SHA256 = "sha256"
 _HASH_KEY_TO_ALGO = {
@@ -176,10 +178,75 @@ class MetadataDatabase:
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
             con = self._connect()
             try:
+                row = con.execute("PRAGMA user_version").fetchone()
+                existing_version = int(row[0]) if row is not None else 0
                 con.executescript(_load_schema_sql())
+                if existing_version < _SCHEMA_VERSION:
+                    con.execute("BEGIN IMMEDIATE")
+                    try:
+                        if existing_version < 2:
+                            self._migrate_v1_to_v2_runtime_settings(con)
+                        con.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+                        con.execute("COMMIT")
+                    except Exception:
+                        con.execute("ROLLBACK")
+                        raise
             finally:
                 con.close()
             self._initialized = True
+
+    @staticmethod
+    def _migrate_v1_to_v2_runtime_settings(con: sqlite3.Connection) -> None:
+        """Preserve legacy Checkpoint overrides under the explicit SDXL profile.
+
+        Version 1 stored runtime settings by content_id without a profile or an
+        originating folder. Historical path rows are therefore used to retain
+        settings that may be actively used by Checkpoint workflows, including
+        deleted paths. Diffusion Model-only and orphaned settings are retired.
+        """
+        rows = con.execute(
+            """
+            SELECT
+                settings.content_id,
+                settings.settings_json,
+                EXISTS (
+                    SELECT 1
+                    FROM file_identity AS identity
+                    JOIN local_asset_path AS path
+                      ON path.file_id = identity.file_id
+                    WHERE identity.content_id = settings.content_id
+                      AND path.folder_name = 'checkpoints'
+                ) AS has_checkpoint_history
+            FROM model_runtime_settings AS settings
+            """
+        ).fetchall()
+
+        for row in rows:
+            content_id = _as_int(row["content_id"])
+            if content_id is None:
+                continue
+            normalized = normalize_model_runtime_settings(row["settings_json"])
+            if bool(row["has_checkpoint_history"]) and normalized:
+                con.execute(
+                    "UPDATE model_runtime_settings SET settings_json = ? WHERE content_id = ?",
+                    (
+                        json.dumps(
+                            normalized,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        ),
+                        content_id,
+                    ),
+                )
+                continue
+
+            # Diffusion runtime overrides were removed in v2. Deleting the row
+            # also prevents a hidden legacy shift from affecting future loads.
+            con.execute(
+                "DELETE FROM model_runtime_settings WHERE content_id = ?",
+                (content_id,),
+            )
 
     def open_writer_connection(self) -> sqlite3.Connection:
         self.initialize()
@@ -724,7 +791,7 @@ class MetadataDatabase:
     def get_model_runtime_settings_by_content_id(
         self,
         content_id: int,
-    ) -> dict[str, int | float]:
+    ) -> ModelRuntimeSettings:
         cid = _as_int(content_id)
         if cid is None:
             return {}
@@ -742,6 +809,20 @@ class MetadataDatabase:
         if row is None:
             return {}
         return normalize_model_runtime_settings(row["settings_json"])
+
+    def get_model_user_note_by_content_id(self, content_id: int) -> str:
+        cid = _as_int(content_id)
+        if cid is None:
+            return ""
+
+        con = self._reader_connection()
+        row = con.execute(
+            "SELECT note_text FROM model_user_note WHERE content_id = ? LIMIT 1",
+            (cid,),
+        ).fetchone()
+        if row is None:
+            return ""
+        return str(row["note_text"] or "")
 
     def _get_civitai_file_hashes_by_file_id(
         self,
@@ -775,7 +856,7 @@ class MetadataDatabase:
         *,
         folder_name: str,
         relative_path: str,
-    ) -> dict[str, int | float]:
+    ) -> ModelRuntimeSettings:
         if not is_supported_model_runtime_settings_folder(folder_name):
             return {}
 
@@ -788,6 +869,20 @@ class MetadataDatabase:
 
         settings = self.get_model_runtime_settings_by_content_id(content_id)
         return filter_model_runtime_settings_for_folder(folder_name, settings)
+
+    def get_model_user_note_by_relative_path(
+        self,
+        *,
+        folder_name: str,
+        relative_path: str,
+    ) -> str:
+        content_id = self.get_content_id_by_relative_path(
+            folder_name=folder_name,
+            relative_path=relative_path,
+        )
+        if content_id is None:
+            return ""
+        return self.get_model_user_note_by_content_id(content_id)
 
     def get_model_reference_by_relative_path(
         self,
@@ -1187,13 +1282,17 @@ class MetadataDatabase:
         folder_name: str,
         settings: Mapping[str, Any] | None,
         updated_at: str,
-    ) -> dict[str, int | float]:
+    ) -> ModelRuntimeSettings:
         cid = _as_int(content_id)
         updated_at_text = str(updated_at or "").strip()
         if cid is None or not updated_at_text:
             return {}
 
-        normalized_settings = filter_model_runtime_settings_for_folder(folder_name, settings)
+        normalized_settings = filter_model_runtime_settings_for_folder(
+            folder_name,
+            settings,
+            infer_legacy_profile=False,
+        )
         if normalized_settings:
             con.execute(
                 """
@@ -1217,6 +1316,36 @@ class MetadataDatabase:
             con.execute("DELETE FROM model_runtime_settings WHERE content_id = ?", (cid,))
 
         return normalized_settings
+
+    def replace_model_user_note(
+        self,
+        con: sqlite3.Connection,
+        *,
+        content_id: int,
+        note_text: str,
+        updated_at: str,
+    ) -> str:
+        cid = _as_int(content_id)
+        note = str(note_text or "")
+        updated_at_text = str(updated_at or "").strip()
+        if cid is None or not updated_at_text:
+            return ""
+
+        if note.strip():
+            con.execute(
+                """
+                INSERT INTO model_user_note (content_id, note_text, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(content_id) DO UPDATE SET
+                    note_text = excluded.note_text,
+                    updated_at = excluded.updated_at
+                """,
+                (cid, note, updated_at_text),
+            )
+            return note
+
+        con.execute("DELETE FROM model_user_note WHERE content_id = ?", (cid,))
+        return ""
 
     def upsert_civitai_lookup_state(
         self,

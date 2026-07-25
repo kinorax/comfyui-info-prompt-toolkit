@@ -15,6 +15,7 @@ from .. import const as Const
 from ..utils import cast as Cast
 from ..utils.model_lora_metadata_pipeline import get_shared_metadata_pipeline
 from ..utils.model_merge import model_runtime_settings_tree
+from ..utils.model_runtime_settings import effective_model_runtime_settings
 from ..utils.settings import (
     CACHE_RETENTION_FIXED,
     get_use_loaded_model_cache_settings,
@@ -132,17 +133,15 @@ def _runtime_settings_for_model(model: object) -> dict[str, int | float]:
     if model_name is None:
         return {}
 
-    if is_checkpoint_model(model):
-        folder_name = Const.MODEL_FOLDER_PATH_CHECKPOINTS
-    elif is_diffusion_model(model):
-        folder_name = Const.MODEL_FOLDER_PATH_DIFFUSION_MODELS
-    else:
+    if not is_checkpoint_model(model):
         return {}
 
     pipeline = get_shared_metadata_pipeline(start=True)
-    return pipeline.get_model_runtime_settings_by_relative_path(
-        folder_name=folder_name,
-        relative_path=model_name,
+    return effective_model_runtime_settings(
+        pipeline.get_model_runtime_settings_by_relative_path(
+            folder_name=Const.MODEL_FOLDER_PATH_CHECKPOINTS,
+            relative_path=model_name,
+        )
     )
 
 
@@ -158,11 +157,13 @@ def _cache_key(
     lora_stack_items: list[tuple[str, float]],
     clip: object | None,
     vae: object | None,
+    apply_lora_to_clip: object | None,
 ) -> str:
     payload = {
         "model": cache_descriptor(model),
         "lora_stack": _to_lora_stack_payload(lora_stack_items),
         "runtime_settings": _runtime_settings_tree_for_model(model),
+        "apply_lora_to_clip": _bool_or_default(apply_lora_to_clip, True),
     }
 
     if is_checkpoint_model(model):
@@ -267,6 +268,25 @@ def _force_single_unknown_targets(unknown_targets: tuple[str, ...]) -> tuple[str
     return tuple(target for target in unknown_targets if target == "model")
 
 
+def _cache_total_bytes(cache_keys: list[str] | None = None) -> int:
+    keys = list(_LAST_CACHE.keys()) if cache_keys is None else cache_keys
+    seen_runtime_ids: set[int] = set()
+    total_bytes = 0
+    for key in keys:
+        bundle = _LAST_CACHE.get(key)
+        if bundle is None:
+            continue
+        for runtime in bundle:
+            if runtime is None:
+                continue
+            runtime_id = id(runtime)
+            if runtime_id in seen_runtime_ids:
+                continue
+            seen_runtime_ids.add(runtime_id)
+            total_bytes += _runtime_size(runtime).bytes
+    return total_bytes
+
+
 def _total_vram_bytes_or_zero() -> int:
     try:
         return max(0, int(comfy_model_management.get_total_memory(comfy_model_management.get_torch_device())))
@@ -303,7 +323,7 @@ def _store_last_cache(cache_key: str, model: object, clip: object | None, vae: o
         _LAST_CACHE_UNKNOWN.move_to_end(cache_key)
 
         recent_keys = list(_LAST_CACHE.keys())[-max_entries:]
-        recent_total_bytes = sum(_LAST_CACHE_BYTES.get(key, 0) for key in recent_keys)
+        recent_total_bytes = _cache_total_bytes(recent_keys)
         recent_force_unknown = any(
             _force_single_unknown_targets(_LAST_CACHE_UNKNOWN.get(key, ()))
             for key in recent_keys
@@ -325,13 +345,13 @@ def _store_last_cache(cache_key: str, model: object, clip: object | None, vae: o
                 reason = "budget" if target_limit < max_entries else "budget_ok"
 
         while len(_LAST_CACHE) > target_limit:
-            old_key_size = _LAST_CACHE_BYTES.get(next(iter(_LAST_CACHE)), 0)
+            cache_total_before = _cache_total_bytes()
             old_key, _ = _LAST_CACHE.popitem(last=False)
             _LAST_CACHE_BYTES.pop(old_key, None)
             _LAST_CACHE_UNKNOWN.pop(old_key, None)
-            evicted_entries.append((old_key, old_key_size))
+            evicted_entries.append((old_key, max(0, cache_total_before - _cache_total_bytes())))
 
-        final_total_bytes = sum(_LAST_CACHE_BYTES.values())
+        final_total_bytes = _cache_total_bytes()
 
         return _StoreCacheResult(
             bundle_size=bundle_size,
@@ -354,12 +374,11 @@ def _auto_cache_limit(recent_keys: list[str], budget_bytes: int) -> int:
         return 1
 
     target_limit = 1
-    running_total = 0
     for count, key in enumerate(reversed(recent_keys), start=1):
-        next_total = running_total + _LAST_CACHE_BYTES.get(key, 0)
+        selected_keys = recent_keys[-count:]
+        next_total = _cache_total_bytes(selected_keys)
         if count > 1 and next_total > budget_bytes:
             break
-        running_total = next_total
         target_limit = count
     return max(1, target_limit)
 
@@ -454,11 +473,13 @@ def _apply_lora_stack_with_project_node(
     model: object,
     clip: object | None,
     lora_stack: list[dict[str, str | float]] | None,
+    apply_lora_to_clip: object | None,
 ) -> tuple[object, object | None]:
     result = LoraStackLorader.execute(
         model=model,
         clip=clip,
         lora_stack=lora_stack,
+        apply_lora_to_clip=apply_lora_to_clip,
     )
     return result[0], result[1]
 
@@ -530,6 +551,14 @@ class UseLoadedModel(c_io.ComfyNode):
                         "lora_stack is still used for the cache key."
                     ),
                 ),
+                c_io.Boolean.Input(
+                    "apply_lora_to_clip",
+                    default=True,
+                    tooltip=(
+                        "Controls CLIP LoRA application and always participates in the cache key. "
+                        "When apply_lora_stack is false, set this to match the externally prepared CLIP."
+                    ),
+                ),
             ],
             outputs=[
                 MODEL_RUNTIME_TYPE.Output(
@@ -558,6 +587,7 @@ class UseLoadedModel(c_io.ComfyNode):
         loaded_clip: object | None = None,
         loaded_vae: object | None = None,
         apply_lora_stack: object | None = True,
+        apply_lora_to_clip: object | None = True,
     ) -> bool | str:
         return True
 
@@ -572,6 +602,7 @@ class UseLoadedModel(c_io.ComfyNode):
         loaded_clip: object | None = None,
         loaded_vae: object | None = None,
         apply_lora_stack: object | None = True,
+        apply_lora_to_clip: object | None = True,
     ) -> int:
         return time.time_ns()
 
@@ -586,12 +617,13 @@ class UseLoadedModel(c_io.ComfyNode):
         loaded_clip: object = _MISSING,
         loaded_vae: object = _MISSING,
         apply_lora_stack: object | None = True,
+        apply_lora_to_clip: object | None = True,
     ) -> list[str]:
         if normalized_model_name_or_none(model) is None:
             return []
 
         lora_stack_items = _to_lora_stack_items(lora_stack)
-        cache_key = _cache_key(model, lora_stack_items, clip, vae)
+        cache_key = _cache_key(model, lora_stack_items, clip, vae, apply_lora_to_clip)
         cached = _load_from_cache(cache_key)
         if cached is not None:
             return []
@@ -613,12 +645,13 @@ class UseLoadedModel(c_io.ComfyNode):
         loaded_clip: object = _MISSING,
         loaded_vae: object = _MISSING,
         apply_lora_stack: object | None = True,
+        apply_lora_to_clip: object | None = True,
     ) -> c_io.NodeOutput:
         if normalized_model_name_or_none(model) is None:
             raise RuntimeError("model is required")
 
         lora_stack_items = _to_lora_stack_items(lora_stack)
-        cache_key = _cache_key(model, lora_stack_items, clip, vae)
+        cache_key = _cache_key(model, lora_stack_items, clip, vae, apply_lora_to_clip)
 
         cached = _load_from_cache(cache_key)
         if cached is not None:
@@ -656,6 +689,7 @@ class UseLoadedModel(c_io.ComfyNode):
                 runtime_model,
                 runtime_clip,
                 normalized_lora_stack,
+                apply_lora_to_clip,
             )
 
         runtime_vae = None if loaded_vae is _MISSING else loaded_vae

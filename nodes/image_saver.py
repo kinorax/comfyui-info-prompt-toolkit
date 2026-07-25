@@ -13,26 +13,27 @@ from PIL import Image, PngImagePlugin
 from comfy_api.latest import io as c_io
 
 from .. import const as Const
-from ..utils.a1111_infotext import image_info_to_a1111_infotext
-from ..utils.image_info_hash_extras import (
-    add_civitai_hash_extras,
-    clear_representative_hash_extras,
-)
+from ..utils.image_metadata_writer import write_ipt_private_metadata_only
+from ..utils.metadata_encryption import prepare_image_info_metadata
 from ..utils import cast as Cast
 from ..utils import exif as Exif
 
-_OUTPUT_SUBDIR_OPTIONS = ("none", "year", "year_month", "iso_week", "year_month_day")
-_OUTPUT_FORMAT_OPTIONS = ("webp", "png")
+_OUTPUT_SUBDIR_OPTIONS = ("none", "year", "year_month", "iso_week", "year_month_day", "daily_run")
+_OUTPUT_FORMAT_OPTIONS = ("webp", "png", "jpeg")
 _DEFAULT_OUTPUT_FORMAT = "webp"
+_DAILY_RUN_COUNTER_DIGITS = 4
+_DAILY_RUN_COUNTER_MAX = (10**_DAILY_RUN_COUNTER_DIGITS) - 1
 _WEBP_METHOD = 6
 _WEBP_LOSSLESS_QUALITY = 80
 _WEBP_EXT = ".webp"
 _PNG_EXT = ".png"
+_JPEG_EXT = ".jpg"
 _OUTPUT_FORMAT_EXTENSIONS = {
     "webp": _WEBP_EXT,
     "png": _PNG_EXT,
+    "jpeg": _JPEG_EXT,
 }
-_OUTPUT_IMAGE_EXTS = tuple(_OUTPUT_FORMAT_EXTENSIONS.values())
+_OUTPUT_IMAGE_EXTS = tuple(dict.fromkeys((*_OUTPUT_FORMAT_EXTENSIONS.values(), ".jpeg")))
 _MISSING = object()
 _INVALID_FILE_STEM_CHARS = set('<>:"|?*')
 _WINDOWS_RESERVED_BASENAMES = {
@@ -170,6 +171,51 @@ def _resolve_subdir(now: datetime, output_subdir: str) -> str:
     raise ValueError(f"unsupported output_subdir: {output_subdir}")
 
 
+def _find_next_daily_run_counter(folder: Path, date_prefix: str) -> int:
+    current_max = 0
+    expected_prefix = f"{date_prefix}-"
+    for entry in os.scandir(folder):
+        if not entry.is_dir():
+            continue
+
+        name = entry.name
+        if not name.startswith(expected_prefix):
+            continue
+        counter_text = name[len(expected_prefix):]
+        if len(counter_text) != _DAILY_RUN_COUNTER_DIGITS or not counter_text.isdigit():
+            continue
+        counter = int(counter_text)
+        if counter > current_max:
+            current_max = counter
+    return current_max + 1
+
+
+def _create_daily_run_directory(folder: Path, date_prefix: str) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    counter = _find_next_daily_run_counter(folder, date_prefix)
+
+    while counter <= _DAILY_RUN_COUNTER_MAX:
+        target = folder / f"{date_prefix}-{counter:0{_DAILY_RUN_COUNTER_DIGITS}d}"
+        try:
+            target.mkdir(exist_ok=False)
+        except FileExistsError:
+            counter += 1
+            continue
+        return target
+
+    raise RuntimeError(f"daily_run counter exhausted for {date_prefix}")
+
+
+def _resolve_target_directory(base_output_dir: Path, now: datetime, output_subdir: str) -> Path:
+    if output_subdir == "daily_run":
+        return _create_daily_run_directory(base_output_dir, now.strftime("%Y%m%d"))
+
+    subdir = _resolve_subdir(now, output_subdir)
+    target = (base_output_dir / subdir).resolve() if subdir else base_output_dir
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
 def _find_next_counter(folder: Path, date_prefix: str) -> int:
     current_max = 0
     expected_prefix = f"{date_prefix}-"
@@ -280,11 +326,7 @@ def _resolve_forced_file_stems(raw: Any, image_count: int, output_ext: str = _WE
 
 
 def _build_infotext(image_info: Any) -> str:
-    if not isinstance(image_info, Mapping):
-        return ""
-    image_info_without_hashes = clear_representative_hash_extras(image_info)
-    image_info_with_hashes = add_civitai_hash_extras(image_info_without_hashes)
-    return image_info_to_a1111_infotext(image_info_with_hashes)
+    return prepare_image_info_metadata(image_info).infotext
 
 
 def _resolve_caption_text(caption_value: Any, image_info: Any) -> str:
@@ -325,6 +367,19 @@ def _build_webp_save_kwargs(quality: int, infotext: str) -> dict[str, Any]:
         kwargs["lossless"] = True
         kwargs["quality"] = _WEBP_LOSSLESS_QUALITY
 
+    if infotext:
+        user_comment = b"UNICODE\x00" + infotext.encode("utf-16-be")
+        exif = Image.Exif()
+        exif[Exif.EXIF_USERCOMMENT_TAG] = user_comment
+        kwargs["exif"] = exif.tobytes()
+    return kwargs
+
+
+def _build_jpeg_save_kwargs(quality: int, infotext: str) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "format": "JPEG",
+        "quality": int(quality),
+    }
     if infotext:
         user_comment = b"UNICODE\x00" + infotext.encode("utf-16-be")
         exif = Image.Exif()
@@ -391,14 +446,14 @@ class ImageSaver(c_io.ComfyNode):
                     "output_subdir",
                     options=list(_OUTPUT_SUBDIR_OPTIONS),
                     default="none",
-                    tooltip="Output sub directory format",
+                    tooltip="Output subdirectory format; daily_run creates YYYYMMDD-NNNN per execution",
                 ),
                 c_io.Int.Input(
                     "quality",
                     default=100,
                     min=0,
                     max=100,
-                    tooltip="WebP quality",
+                    tooltip="WebP/JPEG quality",
                 ),
                 c_io.Boolean.Input(
                     "write_caption",
@@ -428,6 +483,10 @@ class ImageSaver(c_io.ComfyNode):
                     Cast.out_id("file_path"),
                     display_name="file_path",
                     is_output_list=True,
+                ),
+                c_io.AnyType.Output(
+                    Cast.out_id("directory_path"),
+                    display_name="directory_path",
                 ),
             ],
         )
@@ -467,7 +526,7 @@ class ImageSaver(c_io.ComfyNode):
             raise ValueError("output_dir is required")
         if output_subdir is _MISSING:
             raise ValueError("output_subdir is required")
-        if quality is _MISSING and output_format_value == "webp":
+        if quality is _MISSING and output_format_value in ("webp", "jpeg"):
             raise ValueError("quality is required")
         if write_caption is _MISSING:
             raise ValueError("write_caption is required")
@@ -490,9 +549,8 @@ class ImageSaver(c_io.ComfyNode):
         now = datetime.now()
         output_root = _resolve_output_root()
         base_output_dir = _resolve_output_dir(None if output_dir_value is None else str(output_dir_value), output_root)
-        subdir = _resolve_subdir(now, output_subdir_value)
-        target_dir = (base_output_dir / subdir).resolve() if subdir else base_output_dir
-        target_dir.mkdir(parents=True, exist_ok=True)
+        target_dir = _resolve_target_directory(base_output_dir, now, output_subdir_value)
+        directory_path = _relative_to_output_root(target_dir, output_root)
 
         date_prefix = now.strftime("%Y%m%d")
         counter = _find_next_counter(target_dir, date_prefix) if forced_file_stems is None else 0
@@ -507,17 +565,29 @@ class ImageSaver(c_io.ComfyNode):
                 stem = forced_file_stems[idx]
             image_path = target_dir / f"{stem}{output_ext}"
             info_item = image_info_mapped[idx]
-            infotext = _build_infotext(info_item)
+            prepared_metadata = prepare_image_info_metadata(info_item)
+            infotext = prepared_metadata.infotext
 
             img = _to_pil(image_item)
             if output_format_value == "png":
                 save_kwargs = _build_png_save_kwargs(infotext)
+            elif output_format_value == "jpeg":
+                image_mode = str(getattr(img, "mode", "") or "")
+                if image_mode and image_mode not in ("RGB", "L"):
+                    img = img.convert("RGB")
+                save_kwargs = _build_jpeg_save_kwargs(quality_value, infotext)
             else:
                 save_kwargs = _build_webp_save_kwargs(quality_value, infotext)
             try:
                 img.save(image_path, **save_kwargs)
             except Exception as exc:
                 raise RuntimeError(f"failed to save image: {image_path}") from exc
+
+            if prepared_metadata.encrypted_payload is not None:
+                try:
+                    write_ipt_private_metadata_only(image_path, prepared_metadata.encrypted_payload)
+                except Exception as exc:
+                    raise RuntimeError(f"failed to write encrypted metadata: {image_path}") from exc
 
             if infotext:
                 try:
@@ -557,5 +627,6 @@ class ImageSaver(c_io.ComfyNode):
             image_out_values,
             image_info_out_values,
             saved_paths,
+            directory_path,
             ui={"images": ui_images},
         )

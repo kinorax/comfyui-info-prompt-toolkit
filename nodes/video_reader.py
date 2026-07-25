@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from pathlib import Path
 from typing import Any, Mapping
@@ -13,22 +14,35 @@ from comfy_api.latest import io as c_io
 
 from .. import const as Const
 from ..utils import cast as Cast
-from ..utils.a1111_infotext import a1111_infotext_to_image_info
-from ..utils.image_info_normalizer import normalize_image_info_with_comfy_options
+from ..utils.metadata_encryption import image_info_from_metadata, unpack_video_encrypted_payloads
+from ..utils.mp4_private_metadata import read_ipt_private_metadata
+from ..utils.video_color import (
+    COLOR_ENCODING_BT2020,
+    COLOR_ENCODING_BT709,
+    convert_rgb_tensor_color_encoding,
+    describe_video_stream_color,
+    video_color_diagnostic_warnings,
+)
 from ..utils.video_runtime_support import (
     VIDEO_READER_BACKEND_UNAVAILABLE_MESSAGE,
     get_video_from_file_loader,
     is_video_backend_unavailable_error,
 )
+from ..utils.webm_metadata import (
+    extract_matroska_metadata,
+    extract_matroska_private_metadata,
+)
 
 _PATH_SOURCE_OPTIONS = ("input", "output")
-_VIDEO_EXTENSIONS = (".mp4",)
+_VIDEO_EXTENSIONS = (".mp4", ".webm", ".mkv")
+_MATROSKA_EXTENSIONS = (".webm", ".mkv")
 _SOURCE_IMAGEINFO_DISPLAY_NAME = "source_image_info"
 _IMAGE_INFOTEXT_METADATA_KEY = "image_infotext"
 _VIDEO_INFOTEXT_METADATA_KEY = "video_infotext"
 _LEGACY_INFOTEXT_METADATA_KEY = "infotext"
 _IMAGE_INFOTEXT_RAW_OUTPUT_ID = "image_infotext_raw"
 _VIDEO_INFOTEXT_RAW_OUTPUT_ID = "video_infotext_raw"
+_LOGGER = logging.getLogger(__name__)
 
 
 def _resolve_base_directory(path_source: str) -> tuple[Path, str]:
@@ -142,7 +156,7 @@ def _resolve_video_path(directory: str, file: str, path_source: str) -> Path:
         raise ValueError("file must be under selected directory")
 
     if not _is_target_video_file(target):
-        raise ValueError(f"video file not found or not mp4: {file_name}")
+        raise ValueError(f"video file not found or not MP4/WebM/MKV: {file_name}")
     return target
 
 
@@ -158,14 +172,204 @@ def _read_info_from_metadata(
     *,
     key: str,
     fallback_key: str | None = None,
+    encrypted_payload: bytes | None = None,
+    file_name: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     infotext_raw = _read_metadata_text(metadata, key)
     if not infotext_raw and fallback_key:
         infotext_raw = _read_metadata_text(metadata, fallback_key)
 
-    image_info = a1111_infotext_to_image_info(infotext_raw or None)
-    image_info = normalize_image_info_with_comfy_options(image_info)
+    image_info = image_info_from_metadata(infotext_raw or None, encrypted_payload, file_name=file_name)
     return image_info, infotext_raw
+
+
+def _read_container_metadata(
+    video_path: Path,
+    metadata: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], dict[str, bytes | None]]:
+    if video_path.suffix.lower() not in _MATROSKA_EXTENSIONS:
+        return metadata, unpack_video_encrypted_payloads(read_ipt_private_metadata(video_path))
+
+    logical_metadata = extract_matroska_metadata(metadata)
+    try:
+        packed_payload = extract_matroska_private_metadata(metadata)
+    except ValueError:
+        _log_invalid_matroska_private_metadata(video_path)
+        return logical_metadata, {"image": None, "video": None}
+
+    try:
+        encrypted_payloads = unpack_video_encrypted_payloads(packed_payload, strict=True)
+    except ValueError:
+        _log_invalid_matroska_private_metadata(video_path)
+        return logical_metadata, {"image": None, "video": None}
+    return logical_metadata, encrypted_payloads
+
+
+def _log_invalid_matroska_private_metadata(video_path: Path) -> None:
+    _LOGGER.warning(
+        '[IPT] Video Reader: invalid WebM/MKV private metadata for "%s"; '
+        "using public metadata only.",
+        video_path.name,
+    )
+
+
+def _probe_video_color_info(video_path: Path) -> dict[str, Any]:
+    import av
+
+    with av.open(str(video_path), mode="r") as container:
+        if len(container.streams.video) == 0:
+            raise ValueError("video has no video stream")
+        return describe_video_stream_color(container.streams.video[0])
+
+
+def _log_video_color_diagnostics(video_path: Path) -> dict[str, Any] | None:
+    try:
+        color_info = _probe_video_color_info(video_path)
+    except Exception as exc:
+        _LOGGER.warning(
+            "[IPT] Video Reader: failed to inspect color metadata for %s: %s",
+            video_path.name,
+            exc,
+        )
+        return None
+
+    for diagnostic in video_color_diagnostic_warnings(color_info):
+        _LOGGER.warning(
+            "[IPT] Video Reader: %s (%s)",
+            diagnostic,
+            video_path.name,
+        )
+    return color_info
+
+
+def _is_ffv1_rgb_video(video_path: Path) -> bool:
+    if video_path.suffix.lower() != ".mkv":
+        return False
+
+    try:
+        import av
+
+        with av.open(str(video_path), mode="r") as container:
+            if len(container.streams.video) == 0:
+                return False
+            codec_context = container.streams.video[0].codec_context
+            pixel_format = getattr(getattr(codec_context, "format", None), "name", None)
+            return (
+                codec_context.name == "ffv1"
+                and pixel_format in {"bgr0", "gbrp16le"}
+            )
+    except Exception:
+        return False
+
+
+def _decode_ffv1_rgb_components(
+    video_path: Path,
+) -> tuple[torch.Tensor, Any, Mapping[str, Any]]:
+    import av
+    import numpy as np
+
+    frames: list[torch.Tensor] = []
+    audio_frames: list[Any] = []
+    audio: Any = None
+
+    with av.open(str(video_path), mode="r") as container:
+        if len(container.streams.video) == 0:
+            raise ValueError("video has no video stream")
+
+        video_stream = container.streams.video[0]
+        streams = [video_stream]
+        audio_stream = next(
+            (
+                stream
+                for stream in reversed(container.streams.audio)
+                if stream.codec_context is not None
+            ),
+            None,
+        )
+        audio_resampler = None
+        if audio_stream is not None:
+            streams.append(audio_stream)
+            audio_resampler = av.audio.resampler.AudioResampler(format="fltp")
+
+        for packet in container.demux(*streams):
+            if packet.stream.type == "video":
+                try:
+                    decoded_frames = packet.decode()
+                except av.error.InvalidDataError:
+                    _LOGGER.info(
+                        "[IPT] Video Reader: skipped an invalid FFV1 packet in %s",
+                        video_path.name,
+                    )
+                    continue
+
+                for frame in decoded_frames:
+                    image = np.ascontiguousarray(
+                        frame.to_ndarray(format="gbrpf32le")
+                    )
+                    rotation = getattr(frame, "rotation", 0)
+                    if rotation:
+                        quarter_turns = int(round(rotation // 90))
+                        image = np.rot90(
+                            image,
+                            k=quarter_turns,
+                            axes=(0, 1),
+                        ).copy()
+                    frames.append(torch.from_numpy(image))
+            elif audio_resampler is not None:
+                try:
+                    decoded_audio_frames = packet.decode()
+                except av.error.InvalidDataError:
+                    _LOGGER.info(
+                        "[IPT] Video Reader: skipped an invalid audio packet in %s",
+                        video_path.name,
+                    )
+                    continue
+
+                for decoded_audio_frame in decoded_audio_frames:
+                    for resampled_frame in audio_resampler.resample(decoded_audio_frame):
+                        audio_frames.append(resampled_frame.to_ndarray())
+
+        if audio_resampler is not None:
+            for resampled_frame in audio_resampler.resample(None):
+                audio_frames.append(resampled_frame.to_ndarray())
+
+        if len(frames) == 0:
+            raise ValueError("video has no frames")
+        images = torch.stack(frames)
+
+        if audio_stream is not None and len(audio_frames) > 0:
+            audio_data = np.concatenate(audio_frames, axis=1)
+            audio = {
+                "waveform": torch.from_numpy(audio_data).unsqueeze(0),
+                "sample_rate": (
+                    int(audio_stream.sample_rate)
+                    if audio_stream.sample_rate
+                    else 1
+                ),
+            }
+
+        metadata = dict(container.metadata)
+
+    return images, audio, metadata
+
+
+def _convert_decoded_images_to_bt709(
+    images: torch.Tensor,
+    color_info: Mapping[str, Any] | None,
+) -> torch.Tensor:
+    if not color_info:
+        return images
+    if color_info.get("color_encoding") != COLOR_ENCODING_BT2020:
+        return images
+    if color_info.get("color_matrix") != "bt2020nc":
+        return images
+    if color_info.get("color_transfer") != "bt2020-10":
+        return images
+    return convert_rgb_tensor_color_encoding(
+        images,
+        COLOR_ENCODING_BT2020,
+        COLOR_ENCODING_BT709,
+    )
 
 
 def _read_video(
@@ -174,23 +378,39 @@ def _read_video(
     select_every_nth: int,
     frame_load_cap: int,
 ) -> tuple[torch.Tensor, int, dict[str, Any], dict[str, Any], str, str, Any]:
-    video_loader = get_video_from_file_loader(InputImpl)
+    use_ffv1_rgb_decoder = _is_ffv1_rgb_video(video_path)
+    video_loader = (
+        None
+        if use_ffv1_rgb_decoder
+        else get_video_from_file_loader(InputImpl)
+    )
 
     try:
-        video = video_loader(str(video_path))
-        components = video.get_components()
+        if use_ffv1_rgb_decoder:
+            images, audio, raw_metadata = _decode_ffv1_rgb_components(video_path)
+        else:
+            assert video_loader is not None
+            video = video_loader(str(video_path))
+            components = video.get_components()
+            images = components.images
+            audio = components.audio
+            raw_metadata = (
+                components.metadata
+                if isinstance(components.metadata, Mapping)
+                else {}
+            )
     except Exception as exc:
         if is_video_backend_unavailable_error(exc):
             raise RuntimeError(VIDEO_READER_BACKEND_UNAVAILABLE_MESSAGE) from exc
         raise RuntimeError(f"failed to decode video: {video_path.name}") from exc
 
-    images = components.images
     if not isinstance(images, torch.Tensor) or images.ndim != 4:
         raise RuntimeError("decoded video frames are invalid")
 
     total_frames = int(images.shape[0])
     if total_frames <= 0:
         raise ValueError("video has no frames")
+    color_info = _log_video_color_diagnostics(video_path)
     if skip_first_frames >= total_frames:
         raise ValueError("skip_first_frames exceeds available frames")
 
@@ -199,20 +419,23 @@ def _read_video(
         selected = selected[:frame_load_cap]
     if selected.shape[0] <= 0:
         raise ValueError("no frames selected by skip/select/cap options")
+    selected = _convert_decoded_images_to_bt709(selected, color_info)
     frame_count = int(selected.shape[0])
 
-    metadata = components.metadata if isinstance(components.metadata, Mapping) else {}
+    metadata, encrypted_payloads = _read_container_metadata(video_path, raw_metadata)
     image_info, image_infotext_raw = _read_info_from_metadata(
         metadata,
         key=_IMAGE_INFOTEXT_METADATA_KEY,
         fallback_key=_LEGACY_INFOTEXT_METADATA_KEY,
+        encrypted_payload=encrypted_payloads.get("image"),
+        file_name=video_path.name,
     )
     video_info, video_infotext_raw = _read_info_from_metadata(
         metadata,
         key=_VIDEO_INFOTEXT_METADATA_KEY,
+        encrypted_payload=encrypted_payloads.get("video"),
+        file_name=video_path.name,
     )
-
-    audio = components.audio
 
     return selected, frame_count, image_info, video_info, image_infotext_raw, video_infotext_raw, audio
 
@@ -237,12 +460,13 @@ class VideoReader(c_io.ComfyNode):
             node_id="IPT-VideoReader",
             display_name="Video Reader",
             category=Const.CATEGORY_IMAGEINFO,
-            description="Load MP4 video frames and metadata from selected directory/file.",
+            description="Load MP4, WebM, or MKV video frames and metadata from selected directory/file.",
             search_aliases=[
                 "video reader",
                 "load video path",
                 "video file reader",
                 "mp4 reader",
+                "webm reader",
             ],
             inputs=[
                 c_io.Combo.Input(
@@ -255,13 +479,13 @@ class VideoReader(c_io.ComfyNode):
                     "directory",
                     options=directory_options,
                     default=default_directory,
-                    tooltip="Directory that contains mp4 files (nested path)",
+                    tooltip="Directory that contains MP4, WebM, or MKV files (nested path)",
                 ),
                 c_io.Combo.Input(
                     "file",
                     options=file_options,
                     default=default_file,
-                    tooltip="mp4 file name in selected directory",
+                    tooltip="MP4, WebM, or MKV file name in selected directory",
                 ),
                 c_io.Int.Input(
                     "frame_load_cap",

@@ -2,6 +2,7 @@
 import { app } from "../../scripts/app.js";
 
 const TARGET_NODE_TYPES = new Set([
+    "IPT-Float",
     "IPT-SetFloatExtra",
     "SetFloatExtra",
     "Set Float Extra",
@@ -68,7 +69,7 @@ function stepFromDecimals(decimals) {
     return Number((1 / Math.pow(10, decimals)).toFixed(decimals));
 }
 
-function syncSetFloatExtraWidgets(node) {
+function syncFloatWidgets(node) {
     const valueWidget = getWidget(node, VALUE_WIDGET_NAME);
     const decimalsWidget = getWidget(node, DECIMALS_WIDGET_NAME);
     if (!valueWidget || !decimalsWidget || !valueWidget.options) {
@@ -101,12 +102,12 @@ function patchNode(node) {
     const decimalsWidget = getWidget(node, DECIMALS_WIDGET_NAME);
     if (decimalsWidget && !decimalsWidget[PATCHED_FLAG]) {
         decimalsWidget.callback = chainCallback(decimalsWidget.callback, () => {
-            syncSetFloatExtraWidgets(node);
+            syncFloatWidgets(node);
         });
         decimalsWidget[PATCHED_FLAG] = true;
     }
 
-    syncSetFloatExtraWidgets(node);
+    syncFloatWidgets(node);
 }
 
 app.registerExtension({

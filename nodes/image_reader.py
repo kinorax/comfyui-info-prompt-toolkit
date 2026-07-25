@@ -17,9 +17,9 @@ from ..utils import cast as Cast
 from ..utils import clipspace_bridge as ClipspaceBridge
 from ..utils import exif as Exif
 from ..utils.image_file_reference import build_image_file_ref, read_caption_text, resolve_caption_path
-from ..utils.a1111_infotext import a1111_infotext_to_image_info
+from ..utils.image_metadata_writer import read_ipt_private_metadata
 from ..utils.image_reader_metadata import read_a1111_text_from_image_selection
-from ..utils.image_info_normalizer import normalize_image_info_with_comfy_options
+from ..utils.metadata_encryption import image_info_from_metadata
 
 
 def _list_input_images() -> list[str]:
@@ -127,8 +127,8 @@ class ImageReader(c_io.ComfyNode):
             source_path,
             format_name=str(getattr(img, "format", "") or ""),
         )
-        image_info = a1111_infotext_to_image_info(a1111_text)
-        image_info = normalize_image_info_with_comfy_options(image_info)
+        encrypted_payload = read_ipt_private_metadata(image_path)
+        image_info = image_info_from_metadata(a1111_text, encrypted_payload, file_name=source_path.name)
 
         output_images = []
         output_masks = []

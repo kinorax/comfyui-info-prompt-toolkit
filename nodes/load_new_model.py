@@ -12,6 +12,12 @@ from ..utils import cast as Cast
 from ..utils.model_lora_metadata_pipeline import get_shared_metadata_pipeline
 from ..utils.model_merge import model_merge_payload_or_none
 from ..utils.model_runtime_settings import clip_last_layer_from_settings, sd3_shift_from_settings
+from ..utils.settings import get_use_loaded_model_cache_settings
+from ._clip_runtime_cache import (
+    clip_runtime_cache_key,
+    register_reusable_clip_runtime,
+    reusable_clip_runtime,
+)
 from ._runtime_loader import (
     CHECKPOINT_LOADER_KEYS,
     CLIP_LOADER_KEYS_BY_COUNT,
@@ -53,6 +59,20 @@ MODEL_MERGE_SIMPLE_KEYS: tuple[str, ...] = ("ModelMergeSimple",)
 CLIP_MERGE_SIMPLE_KEYS: tuple[str, ...] = ("CLIPMergeSimple",)
 
 
+def _clip_cache_log(action: str, clip_descriptor: object, clip_names: list[str]) -> None:
+    if not get_use_loaded_model_cache_settings().cache_log_enabled:
+        return
+
+    try:
+        key_label = clip_runtime_cache_key(clip_descriptor)[:12]
+        print(
+            f"[IPT][LoadNewModel][clip-cache] clip={action} "
+            f"key={key_label} names={','.join(clip_names)}"
+        )
+    except Exception:
+        pass
+
+
 def _load_cached_vae(vae_name: str, core_nodes_module: object) -> object:
     global _LAST_VAE_NAME
     global _LAST_VAE_RUNTIME
@@ -83,21 +103,17 @@ def _resolve_vae_runtime(value: object, core_nodes_module: object) -> object | N
     return value
 
 
-def _runtime_settings_for_model(model: object) -> dict[str, int | float]:
+def _runtime_settings_for_model(model: object) -> dict[str, str | int | float]:
     model_name = normalized_model_name_or_none(model)
     if model_name is None:
         return {}
 
-    if is_checkpoint_model(model):
-        folder_name = Const.MODEL_FOLDER_PATH_CHECKPOINTS
-    elif is_diffusion_model(model):
-        folder_name = Const.MODEL_FOLDER_PATH_DIFFUSION_MODELS
-    else:
+    if not is_checkpoint_model(model):
         return {}
 
     pipeline = get_shared_metadata_pipeline(start=True)
     return pipeline.get_model_runtime_settings_by_relative_path(
-        folder_name=folder_name,
+        folder_name=Const.MODEL_FOLDER_PATH_CHECKPOINTS,
         relative_path=model_name,
     )
 
@@ -139,6 +155,11 @@ def _load_diffusion_clip(core_nodes_module: object, clip: object) -> object | No
     if not clip_names:
         return None
 
+    cached_runtime = reusable_clip_runtime(payload)
+    if cached_runtime is not None:
+        _clip_cache_log("reuse", payload, clip_names)
+        return cached_runtime
+
     loader_keys = CLIP_LOADER_KEYS_BY_COUNT.get(len(clip_names))
     if loader_keys is None:
         raise RuntimeError(f"Unsupported CLIP count: {len(clip_names)}")
@@ -153,11 +174,14 @@ def _load_diffusion_clip(core_nodes_module: object, clip: object) -> object | No
         clip_type=normalized_clip_type_or_none(payload),
         device=normalized_clip_device_or_none(payload),
     )
-    return _apply_clip_last_layer_if_needed(
+    runtime_clip = _apply_clip_last_layer_if_needed(
         core_nodes_module,
         runtime_clip,
         normalized_clip_last_layer_or_none(payload),
     )
+    register_reusable_clip_runtime(payload, runtime_clip)
+    _clip_cache_log("load", payload, clip_names)
+    return runtime_clip
 
 
 def _model_merging_module_or_none() -> object | None:
@@ -281,16 +305,10 @@ def _load_diffusion_model_bundle(model: object, core_nodes_module: object) -> tu
     if diffusion_loader_class is None:
         raise RuntimeError("Load Diffusion Model node is unavailable")
 
-    runtime_settings = _runtime_settings_for_model(model)
     runtime_model = load_diffusion_model_with_core_loader(
         diffusion_loader_class(),
         model_name,
         weight_dtype=normalized_model_weight_dtype_or_none(model),
-    )
-    runtime_model = _apply_model_sampling_sd3_if_needed(
-        core_nodes_module,
-        runtime_model,
-        sd3_shift_from_settings(runtime_settings),
     )
     return runtime_model, None, None
 

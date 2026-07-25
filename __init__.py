@@ -5,9 +5,13 @@ from typing_extensions import override
 from comfy_api.latest import ComfyExtension, io as c_io
 from .nodes.image_info_context import ImageInfoContext
 from .nodes.image_info_defaults import ImageInfoDefaults
+from .nodes.image_info_encryption_targets import ImageInfoEncryptionTargets, SetImageInfoEncryptionTargets
 from .nodes.image_info_fallback import ImageInfoFallback
 from .nodes.any_switch_any import AnySwitchAny
+from .nodes.optional_switch import OptionalSwitch
 from .nodes.has_value_any import HasValueAny
+from .nodes.get_list_item import GetListItem
+from .nodes.float import Float
 from .nodes.debug.console_log_relay import ConsoleLogRelay
 from .nodes.debug.image_batch_count_debug import ImageBatchCountDebug
 from .nodes.debug.image_info_count_debug import ImageInfoCountDebug
@@ -20,6 +24,7 @@ from .nodes.split_sampler_params import SplitSamplerParams
 from .nodes.sampler_custom_from_params import SamplerCustomFromParams
 from .nodes.sampler_custom_from_params_tiled import SamplerCustomFromParamsTiled
 from .nodes.lora_selector import LoraSelector
+from .nodes.power_lora_selector import PowerLoraSelector
 from .nodes.checkpoint_selector import CheckpointSelector
 from .nodes.model_merge import ModelMerge
 from .nodes.use_loaded_model import UseLoadedModel
@@ -41,7 +46,7 @@ from .nodes.batch_image_reader import ImageDirectoryReader
 from .nodes.caption_file_saver import CaptionFileSaver
 from .nodes.image_saver import ImageSaver
 from .nodes.referenced_image_saver import ReferencedImageSaver
-from .nodes.video_saver import VideoSaver
+from .nodes.video_saver import VideoSaver, VideoSaverV2
 from .nodes.image_info_to_infotext import ImageInfoToInfotext
 from .nodes.infotext_to_image_info import InfotextToImageInfo
 from .nodes.prompt_to_lora_stack import PromptToLoraStack
@@ -67,9 +72,10 @@ from .nodes.set_margin_extra import SetMarginExtra
 from .nodes.aspect_ratio_to_size import AspectRatioToSize
 from .nodes.aspect_ratio_to_size_trim_margin import AspectRatioToSizeTrimMargin
 from .nodes.scale_width_height import ScaleWidthHeight
-from .nodes.remove_image_info_extra_key import RemoveImageInfoExtraKeys
+from .nodes.remove_image_info_extra_key import RemoveImageInfoExtraKeys, RemoveImageInfoExtraKeysV2
 from .nodes.remove_image_info_main_field import RemoveImageInfoMainFields
 from .nodes.release_memory import ReleaseMemory
+from .nodes.runtime_string import GetRuntimeString, SetRuntimeString
 from .nodes.get_string_extra import GetStringExtra
 from .nodes.get_lora_stack_extra import GetLoraStackExtra
 from .nodes.get_sampler_params_extra import GetSamplerParamsExtra
@@ -83,6 +89,7 @@ from .nodes.mask.mask_overlay_comparer import MaskOverlayComparer
 from .nodes.mask.detailer_start import DetailerStart
 from .nodes.mask.detailer_end import DetailerEnd
 from .nodes.mask.grow_mask import GrowMask
+from .nodes.mask.local_temporal_deflicker import LocalTemporalDeflicker
 from .nodes.mask.remove_small_mask_regions import RemoveSmallMaskRegions
 from .nodes.mask.remove_small_soft_mask_regions import RemoveSmallSoftMaskRegions
 from .nodes.mask.sam3_text_mask import Sam3PromptToMask
@@ -112,9 +119,14 @@ class _Extension(ComfyExtension):
         node_list: list[type[c_io.ComfyNode]] = [
             ImageInfoContext,
             ImageInfoDefaults,
+            ImageInfoEncryptionTargets,
+            SetImageInfoEncryptionTargets,
             ImageInfoFallback,
             AnySwitchAny,
+            OptionalSwitch,
             HasValueAny,
+            GetListItem,
+            Float,
             ConsoleLogRelay,
             ImageBatchCountDebug,
             ImageInfoCountDebug,
@@ -127,6 +139,7 @@ class _Extension(ComfyExtension):
             SamplerCustomFromParams,
             SamplerCustomFromParamsTiled,
             LoraSelector,
+            PowerLoraSelector,
             CheckpointSelector,
             ModelMerge,
             LoadNewModel,
@@ -149,6 +162,7 @@ class _Extension(ComfyExtension):
             ImageSaver,
             ReferencedImageSaver,
             VideoSaver,
+            VideoSaverV2,
             ImageInfoToInfotext,
             InfotextToImageInfo,
             PromptToLoraStack,
@@ -176,8 +190,11 @@ class _Extension(ComfyExtension):
             AspectRatioToSizeTrimMargin,
             ScaleWidthHeight,
             RemoveImageInfoExtraKeys,
+            RemoveImageInfoExtraKeysV2,
             RemoveImageInfoMainFields,
             ReleaseMemory,
+            SetRuntimeString,
+            GetRuntimeString,
             GetStringExtra,
             GetLoraStackExtra,
             GetSamplerParamsExtra,
@@ -191,6 +208,7 @@ class _Extension(ComfyExtension):
             DetailerStart,
             DetailerEnd,
             GrowMask,
+            LocalTemporalDeflicker,
             RemoveSmallMaskRegions,
             RemoveSmallSoftMaskRegions,
             Sam3PromptToMask,

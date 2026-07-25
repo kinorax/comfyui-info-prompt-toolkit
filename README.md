@@ -2,8 +2,9 @@
 
 # ComfyUI-Info-Prompt-Toolkit
 
-This extension node collection is built around simplifying ComfyUI wiring and improving reusability, so trial results are easier to carry into the next production pass.  
-Key features include Civitai-compatible image metadata saving, same-name `.txt` caption saving, XY Plot, Tiled Sampling (`SDXL (with ControlNet Tile)` and `Anima`), SAM3, Detailer, PixAI Tagger, OppaiOracle Tagger, wildcards, and Dynamic Prompts to strengthen your workflow.
+Selectively encrypt prompts, model details, and other generation data you do not want to expose, while saving the rest as A1111/Civitai-compatible metadata. This toolkit’s reader nodes restore encrypted fields, so you can control what an image reveals without giving up reusable generation settings.
+
+Built around `image_info`, it simplifies ComfyUI wiring and makes trial results easier to carry into your next production pass. It also includes same-name `.txt` caption saving, XY Plot, Tiled Sampling (`SDXL (with ControlNet Tile)` and `Anima`), SAM3, Detailer, PixAI Tagger, OppaiOracle Tagger, wildcards, and Dynamic Prompts.
 
 ## Installation
 
@@ -241,10 +242,11 @@ The workflow files use English labels throughout.
 <a href="assets/readme/load-new-model-and-use-loaded-model.webp"><img align="left" hspace="16" src="assets/readme/load-new-model-and-use-loaded-model.webp" alt="Load New Model and Use Loaded Model" width="210"></a>
 <ul>
   <li><code>Load New Model</code> and <code>Use Loaded Model</code> are a paired workflow that separates model loading from model reuse.</li>
-  <li><code>Load New Model</code> receives the selected model from selector nodes such as <code>Checkpoint Selector</code> or <code>Diffusion Model Selector</code>. Checkpoint selections can load <code>model</code>, <code>clip</code>, and <code>vae</code> from the checkpoint; diffusion model selections load the <code>model</code> and use the optional <code>clip</code>, <code>vae</code>, and <code>vae_fallback</code> inputs for the accompanying CLIP/VAE runtime. It uses a temporary strong cache only within the same prompt execution to avoid duplicate raw loads.</li>
-  <li><code>Use Loaded Model</code> keeps the final runtime bundle in a process-local cache keyed by the selected model, runtime settings, <code>lora_stack</code>, and connected <code>clip</code> / <code>vae</code> conditions. On cache hit, the lazy <code>loaded_model</code> / <code>loaded_clip</code> / <code>loaded_vae</code> branch is skipped.</li>
-  <li><code>Use Loaded Model</code> applies <code>lora_stack</code> internally by default. Set <code>apply_lora_stack</code> to <code>false</code> if <code>loaded_model</code> and <code>loaded_clip</code> already include the same LoRA application.</li>
-  <li>If you want to pass through <code>Lora Stack Lorader</code> or <code>TorchCompile</code>-related nodes before <code>Use Loaded Model</code>, place them after <code>Load New Model</code>, then connect their outputs to <code>loaded_model</code>, <code>loaded_clip</code>, and <code>loaded_vae</code> with <code>apply_lora_stack=false</code>.</li>
+  <li><code>Load New Model</code> receives the selected model from selector nodes such as <code>Checkpoint Selector</code> or <code>Diffusion Model Selector</code>. Checkpoint selections can load <code>model</code>, <code>clip</code>, and <code>vae</code> from the checkpoint; diffusion model selections load the <code>model</code> and use the optional <code>clip</code>, <code>vae</code>, and <code>vae_fallback</code> inputs for the accompanying CLIP/VAE runtime.</li>
+  <li>When the same CLIP configuration is used across diffusion models and the CLIP remains unmodified, <code>Load New Model</code> can reuse the CLIP retained by a <code>Use Loaded Model</code> bundle through a weak-reference index and avoid loading it again during model changes.</li>
+  <li><code>Use Loaded Model</code> keeps the final runtime bundle in a process-local cache keyed by the selected model, runtime settings, <code>lora_stack</code>, <code>apply_lora_to_clip</code>, and connected <code>clip</code> / <code>vae</code> conditions. On cache hit, the lazy <code>loaded_model</code> / <code>loaded_clip</code> / <code>loaded_vae</code> branch is skipped.</li>
+  <li><code>Use Loaded Model</code> applies <code>lora_stack</code> internally by default. Set <code>apply_lora_to_clip=false</code> to apply it only to the model and keep CLIP reusable. Set <code>apply_lora_stack=false</code> if <code>loaded_model</code> and <code>loaded_clip</code> already include the same external LoRA processing.</li>
+  <li>When placing <code>Lora Stack Lorader</code> or <code>TorchCompile</code>-related nodes before <code>Use Loaded Model</code>, connect their final outputs to the lazy inputs and set <code>apply_lora_stack=false</code>. <code>Lora Stack Lorader</code> also has <code>apply_lora_to_clip</code>; for external processing, set the same option on <code>Use Loaded Model</code> to describe the final CLIP state.</li>
   <li>Cache behavior is configurable in <code>ComfyUI Settings &gt; Info-Prompt-Toolkit &gt; Use Loaded Model Cache</code>. <code>Auto</code> always keeps the latest entry and prunes older entries by estimated memory size and <code>Memory budget ratio</code>; <code>Fixed</code> keeps up to <code>Max cache entries</code> regardless of the memory budget. <code>Max cache entries</code> defaults to <code>1</code> and can be set from <code>1</code> to <code>9</code>.</li>
   <li><code>Use cache logging</code> prints cache hit / miss / store / evict / clear messages to the ComfyUI Python console, including estimated memory amounts for store and evict events.</li>
   <li><code>lora_stack</code> matching is order- and strength-sensitive, so changing order or values is treated as a different condition set.</li>
@@ -284,26 +286,33 @@ The workflow files use English labels throughout.
 <a href="assets/readme/selector-nodes.webp"><img align="left" hspace="16" src="assets/readme/selector-nodes.webp" alt="Selector nodes" width="210"></a>
 <ul>
   <li>Selector nodes centralize choices for reusable workflow inputs such as checkpoints, diffusion models, LoRAs, CLIP models, VAEs, samplers, and schedulers.</li>
-  <li>Model-related selectors include <code>Checkpoint Selector</code>, <code>Diffusion Model Selector</code>, <code>Unet Model Selector</code>, <code>Lora Selector</code>, <code>Vae Selector</code>, <code>CLIP Selector</code>, <code>Dual CLIP Selector</code>, <code>Triple CLIP Selector</code>, and <code>Quadruple CLIP Selector</code>.</li>
+  <li>Model-related selectors include <code>Checkpoint Selector</code>, <code>Diffusion Model Selector</code>, <code>Unet Model Selector</code>, <code>Lora Selector</code>, <code>Power Lora Selector</code>, <code>Vae Selector</code>, <code>CLIP Selector</code>, <code>Dual CLIP Selector</code>, <code>Triple CLIP Selector</code>, and <code>Quadruple CLIP Selector</code>.</li>
   <li>Supported model-related selectors provide a right-click <code>View Model Info...</code> action that uses the selected asset's SHA256 as a key to fetch metadata from Civitai and display it in a model information window.</li>
   <li>For <code>Lora Selector</code>, <code>View Model Info...</code> can also show a LoRA tag list with tag frequencies when metadata has been analyzed for the selected LoRA.</li>
+  <li><code>Power Lora Selector</code> builds a LoRA stack from any number of rows; each row provides ON/OFF, LoRA, strength, model information, and removal controls.</li>
   <li>Common connection targets include <code>Image Info Defaults</code>, <code>Image Info Context</code>, <code>Load New Model</code>, <code>Use Loaded Model</code>, and <code>XY Plot Modifier</code>.</li>
 </ul>
 <br clear="left">
 
-## Workflow Examples
+## Example Workflows
 
 ### Save Images With Metadata Using `Image Saver`
 
-<a href="assets/readme/wf-sample1.webp"><img src="assets/readme/wf-sample1.webp" alt="Workflow sample: save images with metadata using Image Saver" width="900"></a>
+<a href="example_workflows/Save%20Images%20With%20Metadata%20Using%20Image%20Saver.webp"><img src="example_workflows/Save%20Images%20With%20Metadata%20Using%20Image%20Saver.webp" alt="Workflow sample: save images with metadata using Image Saver" width="900"></a>
 
 Use `Image Saver` at the end of a generation workflow to save images with reusable metadata. The embedded `A1111 infotext` / `image_info` keeps prompt, model, LoRA, sampler, and related settings available for later reuse.
 
 ### Generate From Metadata Loaded by `Image Reader`
 
-<a href="assets/readme/wf-sample2.webp"><img src="assets/readme/wf-sample2.webp" alt="Workflow sample: generate from metadata loaded by Image Reader" width="900"></a>
+<a href="example_workflows/Generate%20From%20Metadata%20Loaded%20by%20Image%20Reader.webp"><img src="example_workflows/Generate%20From%20Metadata%20Loaded%20by%20Image%20Reader.webp" alt="Workflow sample: generate from metadata loaded by Image Reader" width="900"></a>
 
 Load a metadata-rich image with `Image Reader`, pass the restored `image_info` into the workflow, and generate from the saved settings as a starting point for reproduction or further iteration.
+
+### Filter and Encrypt Metadata Before Saving With `Referenced Image Saver`
+
+<a href="example_workflows/Filter%20and%20Encrypt%20Metadata%20Before%20Saving%20With%20Referenced%20Image%20Saver.webp"><img src="example_workflows/Filter%20and%20Encrypt%20Metadata%20Before%20Saving%20With%20Referenced%20Image%20Saver.webp" alt="Workflow sample: filter and encrypt metadata before saving with Referenced Image Saver" width="900"></a>
+
+Load an existing image with `Image Reader`, remove selected main fields and extra keys from its `image_info`, specify which remaining fields to encrypt, and save the result with `Referenced Image Saver`. This lets you choose which metadata is removed, kept public, or stored in encrypted form without re-encoding the image pixels.
 
 ## License
 

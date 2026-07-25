@@ -12,3 +12,6 @@ ftfy==6.1.1
 regex
 iopath>=0.1.10
 typing_extensions
+
+# Required for protected IPT settings and metadata encryption keys.
+cryptography>=41.0.0

@@ -21,6 +21,7 @@ from .model_reference_resolver import resolve_model_reference
 _ROUTES_REGISTERED = False
 _ALLOWED_FOLDERS = {"checkpoints", "diffusion_models", "unet", "loras", "text_encoders", "vae"}
 _LORA_TAG_LIMIT = 1000
+_MODEL_USER_NOTE_MAX_LENGTH = 20000
 
 
 def register_routes() -> None:
@@ -100,7 +101,10 @@ def register_routes() -> None:
         if not relative_path:
             return web.json_response({"ok": False, "error": "relative_path is required"}, status=400)
 
-        normalized_settings = normalize_model_runtime_settings(payload.get("runtime_settings"))
+        normalized_settings = normalize_model_runtime_settings(
+            payload.get("runtime_settings"),
+            infer_legacy_profile=False,
+        )
         result = await asyncio.to_thread(
             pipeline.upsert_model_runtime_settings_by_relative_path,
             folder_name=folder_name,
@@ -125,6 +129,48 @@ def register_routes() -> None:
                     folder_name,
                     result.get("runtime_settings"),
                 ),
+                "updated_at": result.get("updated_at"),
+            }
+        )
+
+    @PromptServer.instance.routes.post("/ipt/model-user-note/upsert")
+    async def ipt_model_user_note_upsert(request):
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        folder_name = str(payload.get("folder_name", "") or "").strip()
+        relative_path = str(payload.get("relative_path", "") or "").strip()
+        user_note = str(payload.get("user_note", "") or "")
+        if folder_name not in _ALLOWED_FOLDERS:
+            return web.json_response({"ok": False, "error": "invalid folder_name"}, status=400)
+        if not relative_path:
+            return web.json_response({"ok": False, "error": "relative_path is required"}, status=400)
+        if len(user_note) > _MODEL_USER_NOTE_MAX_LENGTH:
+            return web.json_response(
+                {"ok": False, "error": f"user_note must be at most {_MODEL_USER_NOTE_MAX_LENGTH} characters"},
+                status=400,
+            )
+
+        result = await asyncio.to_thread(
+            pipeline.upsert_model_user_note_by_relative_path,
+            folder_name=folder_name,
+            relative_path=relative_path,
+            note_text=user_note,
+        )
+        if result is None:
+            return web.json_response(
+                {"ok": False, "error": "model note target is not ready yet"},
+                status=409,
+            )
+
+        return web.json_response(
+            {
+                "ok": True,
+                "folder_name": folder_name,
+                "relative_path": relative_path,
+                "user_note": result.get("user_note", ""),
                 "updated_at": result.get("updated_at"),
             }
         )
@@ -175,6 +221,10 @@ def register_routes() -> None:
                     folder_name=folder_name,
                     relative_path=relative_path,
                 ) if is_supported_model_runtime_settings_folder(folder_name) else {},
+                "user_note": pipeline.get_model_user_note_by_relative_path(
+                    folder_name=folder_name,
+                    relative_path=relative_path,
+                ),
                 "lora_tags": lora_tags,
             }
         )

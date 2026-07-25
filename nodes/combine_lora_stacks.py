@@ -14,7 +14,7 @@ def _lora_stack_or_none(value: object | None) -> list[object] | None:
     if not isinstance(value, list):
         return None
 
-    return list(value)
+    return value
 
 
 class CombineLoraStacks(c_io.ComfyNode):
@@ -63,4 +63,3 @@ class CombineLoraStacks(c_io.ComfyNode):
         merged = list(stack1)
         merged.extend(stack2)
         return c_io.NodeOutput(merged)
-

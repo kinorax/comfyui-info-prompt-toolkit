@@ -14,13 +14,9 @@ from comfy_api.latest import io as c_io
 from .. import const as Const
 from ..utils import cast as Cast
 from ..utils import exif as Exif
-from ..utils.a1111_infotext import image_info_to_a1111_infotext
 from ..utils.image_file_reference import build_image_file_ref, resolve_image_file_ref
-from ..utils.image_info_hash_extras import (
-    add_civitai_hash_extras,
-    clear_representative_hash_extras,
-)
-from ..utils.image_metadata_writer import write_a1111_text_metadata_only
+from ..utils.image_metadata_writer import write_a1111_text_metadata_only, write_ipt_private_metadata_only
+from ..utils.metadata_encryption import prepare_image_info_metadata
 from .image_saver import (
     _MISSING,
     _OUTPUT_SUBDIR_OPTIONS,
@@ -42,11 +38,7 @@ _SUPPORTED_SOURCE_EXTS = (".png", ".webp", ".jpg", ".jpeg")
 
 
 def _build_infotext(image_info: Any) -> str:
-    if not isinstance(image_info, Mapping):
-        return ""
-    image_info_without_hashes = clear_representative_hash_extras(image_info)
-    image_info_with_hashes = add_civitai_hash_extras(image_info_without_hashes)
-    return image_info_to_a1111_infotext(image_info_with_hashes)
+    return prepare_image_info_metadata(image_info).infotext
 
 
 def _resolve_forced_file_stems(raw: Any, count: int) -> list[str] | None:
@@ -277,9 +269,11 @@ class ReferencedImageSaver(c_io.ComfyNode):
                 raise RuntimeError(f"failed to copy referenced image: {source_path.name}") from exc
 
             info_item = image_info_mapped[idx]
-            infotext = _build_infotext(info_item)
+            prepared_metadata = prepare_image_info_metadata(info_item)
+            infotext = prepared_metadata.infotext
             try:
                 write_a1111_text_metadata_only(target_path, infotext)
+                write_ipt_private_metadata_only(target_path, prepared_metadata.encrypted_payload)
             except Exception as exc:
                 raise RuntimeError(f"failed to rewrite image metadata: {target_path}") from exc
             _validate_infotext_metadata(target_path, infotext)

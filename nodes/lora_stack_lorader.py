@@ -9,6 +9,7 @@ from comfy_api.latest import io as c_io
 
 from .. import const as Const
 from ..utils import cast as Cast
+from ._clip_runtime_cache import mark_clip_lora_applied
 
 LORA_STACK_ITEM_NAME_KEY = "name"
 LORA_STACK_ITEM_STRENGTH_KEY = "strength"
@@ -44,6 +45,24 @@ def _to_lora_stack_items(value: object) -> list[tuple[str, float]]:
         normalized.append((name, strength))
 
     return normalized
+
+
+def _bool_or_default(value: object, default: bool) -> bool:
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        return _bool_or_default(value[0], default)
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def _core_nodes_module_or_none() -> object | None:
@@ -175,6 +194,11 @@ class LoraStackLorader(c_io.ComfyNode):
                     Const.IMAGEINFO_LORA_STACK,
                     optional=True,
                 ),
+                c_io.Boolean.Input(
+                    "apply_lora_to_clip",
+                    default=True,
+                    tooltip="If false, apply every LoRA to the model only and keep CLIP unchanged",
+                ),
             ],
             outputs=[
                 MODEL_RUNTIME_TYPE.Output(
@@ -194,6 +218,7 @@ class LoraStackLorader(c_io.ComfyNode):
         model: object | None = None,
         clip: object | None = None,
         lora_stack: object | None = None,
+        apply_lora_to_clip: object | None = True,
     ) -> bool | str:
         # ComfyUI can invoke custom validation with placeholder/None values
         # during graph validation. Hard-failing here causes false negatives.
@@ -205,6 +230,7 @@ class LoraStackLorader(c_io.ComfyNode):
         model: object,
         clip: object | None = None,
         lora_stack: list[dict[str, str | float]] | None = None,
+        apply_lora_to_clip: object | None = True,
     ) -> c_io.NodeOutput:
         stack_items = _to_lora_stack_items(lora_stack)
         if not stack_items:
@@ -222,9 +248,10 @@ class LoraStackLorader(c_io.ComfyNode):
 
         current_model = model
         current_clip = clip
+        should_apply_lora_to_clip = _bool_or_default(apply_lora_to_clip, True)
 
         for lora_name, strength in stack_items:
-            if current_clip is None:
+            if current_clip is None or not should_apply_lora_to_clip:
                 if model_only_loader is not None:
                     current_model = _apply_with_model_only_loader(
                         model_only_loader,
@@ -235,10 +262,10 @@ class LoraStackLorader(c_io.ComfyNode):
                     continue
 
                 if model_and_clip_loader is not None:
-                    current_model, current_clip = _apply_with_model_and_clip_loader(
+                    current_model, _ = _apply_with_model_and_clip_loader(
                         model_and_clip_loader,
                         current_model,
-                        current_clip,
+                        None,
                         lora_name,
                         strength,
                     )
@@ -249,6 +276,7 @@ class LoraStackLorader(c_io.ComfyNode):
             if model_and_clip_loader is None:
                 raise RuntimeError("Load LoRA (Model and CLIP) node is unavailable")
 
+            input_clip = current_clip
             current_model, current_clip = _apply_with_model_and_clip_loader(
                 model_and_clip_loader,
                 current_model,
@@ -256,5 +284,7 @@ class LoraStackLorader(c_io.ComfyNode):
                 lora_name,
                 strength,
             )
+            if strength != 0.0:
+                mark_clip_lora_applied(input_clip, current_clip)
 
         return c_io.NodeOutput(current_model, current_clip)

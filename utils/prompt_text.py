@@ -51,7 +51,8 @@ def combine_prompt_text(start: str | None, end: str | None) -> str | None:
 
 
 def normalize_prompt_tokens(text: str) -> str:
-    normalized = text.strip(" \r\n")
+    normalized = text.replace("\u3000", " ")
+    normalized = normalized.strip(" \r\n")
     normalized = _NEWLINE_RE.sub(",", normalized)
     normalized = _COMMA_WITHOUT_SPACE_RE.sub(", ", normalized)
     normalized = _DOT_WITHOUT_SPACE_RE.sub(". ", normalized)

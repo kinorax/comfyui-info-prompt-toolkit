@@ -1,7 +1,7 @@
 [project]
 name = "info-prompt-toolkit"
-version = "1.4.1"
-description = "Civitai-compatible metadata saving, same-name .txt captions, XY Plot, Tiled Sampling, Detailer, PixAI Tagger, OppaiOracle Tagger, wildcards, Dynamic Prompts, re-encoding-free referenced image saving, and A1111 infotext/image_info reuse to simplify ComfyUI wiring, improve reusability, and carry trial results into the next production pass."
+version = "1.5.0"
+description = "Protect prompts and model details with selective encryption while saving A1111/Civitai-compatible metadata. Built around reusable image_info data to simplify ComfyUI wiring and carry generation settings into the next workflow. Additional tools include same-name .txt caption saving, re-encoding-free referenced-image saving, XY Plot, Tiled Sampling for SDXL and Anima, SAM3, Detailer, PixAI Tagger, OppaiOracle Tagger, wildcards, and Dynamic Prompts."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
@@ -11,6 +11,7 @@ dependencies = [
     "regex",
     "iopath>=0.1.10",
     "typing_extensions",
+    "cryptography>=41.0.0",
 ]
 classifiers = [
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",

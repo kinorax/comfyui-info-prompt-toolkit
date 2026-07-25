@@ -69,6 +69,7 @@ def release_memory_summary_text(result: dict[str, Any]) -> str:
 
 def _clear_use_loaded_model_cache(result: dict[str, Any]) -> None:
     from ..nodes import use_loaded_model
+    from ..nodes._clip_runtime_cache import clear_clip_runtime_cache
 
     with use_loaded_model._CACHE_LOCK:
         entry_count = len(use_loaded_model._LAST_CACHE)
@@ -76,7 +77,13 @@ def _clear_use_loaded_model_cache(result: dict[str, Any]) -> None:
         use_loaded_model._LAST_CACHE_BYTES.clear()
         use_loaded_model._LAST_CACHE_UNKNOWN.clear()
 
-    _append_step(result, "use_loaded_model_cache", cleared_entries=entry_count)
+    clip_reuse_entries = clear_clip_runtime_cache()
+    _append_step(
+        result,
+        "use_loaded_model_cache",
+        cleared_entries=entry_count,
+        cleared_clip_reuse_entries=clip_reuse_entries,
+    )
     log_cache = getattr(use_loaded_model, "_cache_log", None)
     if callable(log_cache):
         log_cache(f"clear reason=release_memory cleared_entries={entry_count}")

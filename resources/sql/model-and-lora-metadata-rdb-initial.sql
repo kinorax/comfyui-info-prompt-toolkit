@@ -1,5 +1,4 @@
 -- Initial schema for model/lora metadata cache database (SQLite)
--- Source spec: docs/spec/model-and-lora-metadata-rdb.md
 
 PRAGMA foreign_keys = ON;
 
@@ -225,6 +224,13 @@ CREATE INDEX IF NOT EXISTS idx_lora_tag_freq
 CREATE TABLE IF NOT EXISTS model_runtime_settings (
     content_id INTEGER PRIMARY KEY,
     settings_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (content_id) REFERENCES content(content_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS model_user_note (
+    content_id INTEGER PRIMARY KEY,
+    note_text TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (content_id) REFERENCES content(content_id) ON DELETE CASCADE
 );

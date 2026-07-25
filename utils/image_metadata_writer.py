@@ -14,6 +14,9 @@ _JPEG_SOI = b"\xff\xd8"
 _RIFF = b"RIFF"
 _WEBP = b"WEBP"
 _PNG_PARAMETERS_KEY = b"parameters"
+_IPT_PRIVATE_CHUNK = b"npTc"
+_JPEG_IPT_PRIVATE_MARKER = 0xEF
+_JPEG_IPT_PRIVATE_PREFIX = b"npTc\x00"
 _EXIF_PREFIX = b"Exif\x00\x00"
 _WEBP_EXIF_FLAG = 0x08
 _WEBP_XMP_FLAG = 0x04
@@ -37,6 +40,43 @@ def write_a1111_text_metadata_only(path: str | Path, text: str) -> None:
         raise ValueError(f"unsupported image format for metadata-only rewrite: {target.suffix or target.name}")
 
     _replace_file_bytes(target, updated)
+
+
+def write_ipt_private_metadata_only(path: str | Path, payload: bytes | None) -> None:
+    target = Path(path)
+    data = target.read_bytes()
+    payload_bytes = bytes(payload) if payload else b""
+
+    if data.startswith(_PNG_SIGNATURE):
+        updated = _rewrite_png_private_metadata(data, payload_bytes)
+    elif data.startswith(_JPEG_SOI):
+        updated = _rewrite_jpeg_private_metadata(data, payload_bytes)
+    elif data.startswith(_RIFF) and data[8:12] == _WEBP:
+        updated = _rewrite_webp_private_metadata(data, payload_bytes)
+    else:
+        raise ValueError(f"unsupported image format for metadata-only rewrite: {target.suffix or target.name}")
+
+    _replace_file_bytes(target, updated)
+
+
+def read_ipt_private_metadata(path: str | Path) -> bytes | None:
+    data = Path(path).read_bytes()
+
+    if data.startswith(_PNG_SIGNATURE):
+        chunks = _read_png_chunks(data)
+        for chunk_type, payload in chunks:
+            if chunk_type == _IPT_PRIVATE_CHUNK:
+                return payload
+        return None
+    if data.startswith(_JPEG_SOI):
+        return _read_jpeg_private_metadata(data)
+    if data.startswith(_RIFF) and data[8:12] == _WEBP:
+        chunks = _read_webp_chunks(data)
+        for chunk_type, payload in chunks:
+            if chunk_type == _IPT_PRIVATE_CHUNK:
+                return payload
+        return None
+    return None
 
 
 def _replace_file_bytes(path: Path, data: bytes) -> None:
@@ -146,6 +186,26 @@ def _rewrite_png_parameters(data: bytes, text: str) -> bytes:
     return bytes(output)
 
 
+def _rewrite_png_private_metadata(data: bytes, payload: bytes) -> bytes:
+    chunks = _read_png_chunks(data)
+    output = bytearray(_PNG_SIGNATURE)
+    inserted = False
+
+    for chunk_type, chunk_payload in chunks:
+        if chunk_type == _IPT_PRIVATE_CHUNK:
+            continue
+
+        if chunk_type == b"IDAT" and payload and not inserted:
+            output.extend(_make_png_chunk(_IPT_PRIVATE_CHUNK, payload))
+            inserted = True
+
+        output.extend(_make_png_chunk(chunk_type, chunk_payload))
+
+    if payload and not inserted:
+        raise ValueError("PNG file did not contain an IDAT chunk")
+    return bytes(output)
+
+
 def _normalize_exif_app1_payload(exif_payload: bytes) -> bytes:
     if not exif_payload:
         return b""
@@ -228,6 +288,112 @@ def _rewrite_jpeg_exif(data: bytes, exif_payload: bytes) -> bytes:
 
     insert_exif()
     return bytes(output)
+
+
+def _rewrite_jpeg_private_metadata(data: bytes, payload: bytes) -> bytes:
+    if not data.startswith(_JPEG_SOI):
+        raise ValueError("not a JPEG file")
+
+    segment_payload = _JPEG_IPT_PRIVATE_PREFIX + payload if payload else b""
+    output = bytearray(_JPEG_SOI)
+    offset = 2
+    inserted = False
+
+    def insert_private() -> None:
+        nonlocal inserted
+        if inserted:
+            return
+        if segment_payload:
+            output.extend(_make_jpeg_segment(_JPEG_IPT_PRIVATE_MARKER, segment_payload))
+        inserted = True
+
+    while offset < len(data):
+        marker_start = offset
+        if data[offset] != 0xFF:
+            insert_private()
+            output.extend(data[offset:])
+            return bytes(output)
+
+        while offset < len(data) and data[offset] == 0xFF:
+            offset += 1
+        if offset >= len(data):
+            insert_private()
+            output.extend(data[marker_start:])
+            return bytes(output)
+
+        marker = data[offset]
+        offset += 1
+
+        if marker == 0x00 or marker == 0x01 or 0xD0 <= marker <= 0xD9:
+            output.extend(data[marker_start:offset])
+            continue
+
+        if offset + 2 > len(data):
+            raise ValueError("truncated JPEG segment length")
+        segment_length = int.from_bytes(data[offset : offset + 2], "big")
+        if segment_length < 2:
+            raise ValueError("invalid JPEG segment length")
+
+        segment_end = offset + segment_length
+        if segment_end > len(data):
+            raise ValueError("truncated JPEG segment payload")
+
+        current_payload = data[offset + 2 : segment_end]
+        segment = data[marker_start:segment_end]
+        offset = segment_end
+
+        if marker == 0xDA:
+            insert_private()
+            output.extend(segment)
+            output.extend(data[offset:])
+            return bytes(output)
+
+        if marker == _JPEG_IPT_PRIVATE_MARKER and current_payload.startswith(_JPEG_IPT_PRIVATE_PREFIX):
+            continue
+
+        if marker != 0xE0:
+            insert_private()
+        output.extend(segment)
+
+    insert_private()
+    return bytes(output)
+
+
+def _read_jpeg_private_metadata(data: bytes) -> bytes | None:
+    if not data.startswith(_JPEG_SOI):
+        raise ValueError("not a JPEG file")
+
+    offset = 2
+    while offset < len(data):
+        if data[offset] != 0xFF:
+            return None
+
+        while offset < len(data) and data[offset] == 0xFF:
+            offset += 1
+        if offset >= len(data):
+            return None
+
+        marker = data[offset]
+        offset += 1
+        if marker == 0x00 or marker == 0x01 or 0xD0 <= marker <= 0xD9:
+            continue
+        if marker == 0xDA:
+            return None
+
+        if offset + 2 > len(data):
+            raise ValueError("truncated JPEG segment length")
+        segment_length = int.from_bytes(data[offset : offset + 2], "big")
+        if segment_length < 2:
+            raise ValueError("invalid JPEG segment length")
+        segment_end = offset + segment_length
+        if segment_end > len(data):
+            raise ValueError("truncated JPEG segment payload")
+
+        current_payload = data[offset + 2 : segment_end]
+        if marker == _JPEG_IPT_PRIVATE_MARKER and current_payload.startswith(_JPEG_IPT_PRIVATE_PREFIX):
+            return current_payload[len(_JPEG_IPT_PRIVATE_PREFIX) :]
+        offset = segment_end
+    return None
 
 
 def _read_webp_chunks(data: bytes) -> list[tuple[bytes, bytes]]:
@@ -330,5 +496,20 @@ def _rewrite_webp_exif(data: bytes, exif_payload: bytes) -> bytes:
         rewritten_chunks.append((b"EXIF", exif_payload))
 
     body = b"".join(_make_webp_chunk(chunk_type, payload) for chunk_type, payload in rewritten_chunks)
+    riff_size = len(body) + 4
+    return _RIFF + riff_size.to_bytes(4, "little") + _WEBP + body
+
+
+def _rewrite_webp_private_metadata(data: bytes, payload: bytes) -> bytes:
+    chunks = _read_webp_chunks(data)
+    rewritten_chunks = [
+        (chunk_type, chunk_payload)
+        for chunk_type, chunk_payload in chunks
+        if chunk_type != _IPT_PRIVATE_CHUNK
+    ]
+    if payload:
+        rewritten_chunks.append((_IPT_PRIVATE_CHUNK, payload))
+
+    body = b"".join(_make_webp_chunk(chunk_type, chunk_payload) for chunk_type, chunk_payload in rewritten_chunks)
     riff_size = len(body) + 4
     return _RIFF + riff_size.to_bytes(4, "little") + _WEBP + body

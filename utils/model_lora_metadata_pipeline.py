@@ -15,6 +15,7 @@ from urllib import request as url_request
 
 from .file_hash_cache import DEFAULT_CHUNK_SIZE, normalize_relative_path
 from .model_runtime_settings import (
+    ModelRuntimeSettings,
     filter_model_runtime_settings_for_folder,
     is_supported_model_runtime_settings_folder,
 )
@@ -280,8 +281,22 @@ class ModelLoraMetadataPipeline:
         *,
         folder_name: str,
         relative_path: str,
-    ) -> dict[str, int | float]:
+    ) -> ModelRuntimeSettings:
         return self._db.get_model_runtime_settings_by_relative_path(
+            folder_name=folder_name,
+            relative_path=relative_path,
+        )
+
+    def get_model_user_note_by_content_id(self, content_id: int) -> str:
+        return self._db.get_model_user_note_by_content_id(content_id)
+
+    def get_model_user_note_by_relative_path(
+        self,
+        *,
+        folder_name: str,
+        relative_path: str,
+    ) -> str:
+        return self._db.get_model_user_note_by_relative_path(
             folder_name=folder_name,
             relative_path=relative_path,
         )
@@ -332,6 +347,54 @@ class ModelLoraMetadataPipeline:
             "folder_name": folder,
             "relative_path": rel,
             "runtime_settings": filter_model_runtime_settings_for_folder(folder, normalized_settings),
+            "updated_at": updated_at,
+        }
+
+    def upsert_model_user_note_by_relative_path(
+        self,
+        *,
+        folder_name: str,
+        relative_path: str,
+        note_text: str,
+    ) -> dict[str, Any] | None:
+        folder = str(folder_name or "").strip()
+        rel = normalize_relative_path(relative_path)
+        if not folder or not rel:
+            return None
+
+        content_id = self._db.get_content_id_by_relative_path(
+            folder_name=folder,
+            relative_path=rel,
+        )
+        if content_id is None:
+            self.enqueue_hash_priority(folder, rel)
+            return None
+
+        updated_at = _utc_now_iso()
+        con = self._db.open_writer_connection()
+        try:
+            con.execute("BEGIN")
+            saved_note = self._db.replace_model_user_note(
+                con,
+                content_id=content_id,
+                note_text=note_text,
+                updated_at=updated_at,
+            )
+            con.execute("COMMIT")
+        except Exception:
+            try:
+                con.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+        finally:
+            con.close()
+
+        return {
+            "content_id": content_id,
+            "folder_name": folder,
+            "relative_path": rel,
+            "user_note": saved_note,
             "updated_at": updated_at,
         }
 
