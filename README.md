@@ -6,6 +6,8 @@ Selectively encrypt prompts, model details, and other generation data you do not
 
 Built around `image_info`, it simplifies ComfyUI wiring and makes trial results easier to carry into your next production pass. It also includes same-name `.txt` caption saving, XY Plot, Tiled Sampling (`SDXL (with ControlNet Tile)` and `Anima`), SAM3, Detailer, PixAI Tagger, OppaiOracle Tagger, wildcards, and Dynamic Prompts.
 
+> Guide: [Using A1111/Civitai-Compatible Metadata: Encrypt Only the Generation Data You Don’t Want to Share](https://note.com/vast_zinnia5253/n/n303bd57226cb?hl=en) — An illustrated guide to saving, restoring, reusing, and selectively encrypting image metadata.
+
 ## Installation
 
 ```bash

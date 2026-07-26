@@ -6,6 +6,8 @@
 
 `image_info` を軸に ComfyUI の配線を簡素化し、試行結果を次の制作へ引き継ぎやすくします。ほかにも、同名 `.txt` キャプション保存、XY Plot、Tiled Sampling（`SDXL (with ControlNet Tile)` と `Anima`）、SAM3、Detailer、PixAI Tagger、OppaiOracle Tagger、wildcards、Dynamic Prompts を備えています。
 
+> 解説記事: [A1111・Civitai互換メタデータを活用する。公開したくない生成情報を暗号化](https://note.com/vast_zinnia5253/n/n303bd57226cb) — メタデータの保存・復元・活用方法と、「公開・暗号化・削除」の使い分けを図付きで紹介しています。
+
 ## Installation
 
 ```bash
